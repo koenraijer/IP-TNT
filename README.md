@@ -1,9 +1,13 @@
+# General
+- Conda env: tnt
+- Git repo: IP-TNT (https://github.com/koenraijer/IP-TNT)
+
 # Structure
 - root:
   - `processing_empatica.ipynb`: notebook to process the Empatica data
   - `processing_inquisit.ipynb`: notebook to process the Inquisit data
   - `combining_empatica_inquisit.ipynb`: notebook to combine the Empatica and Inquisit data
-  - `recalibrating_empatica_inquisit.ipynb`: notebook that uses Empatica tags/events to recalibrate the Inquisit data.
+  - `recalibrating_empatica_inquisit.ipynb`: notebook that uses Empatica tags/events to attempt to recalibrate the Inquisit data.
   - `empatica_helpers.py`: helper functions for processing the Empatica data
   - `inquisit_helpers.py`: helper functions for processing the Inquisit data
   - `helpers.py`: general helper functions
