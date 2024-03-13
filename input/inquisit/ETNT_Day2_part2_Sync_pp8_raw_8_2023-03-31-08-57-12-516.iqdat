@@ -1,6 +1,0 @@
-subject	date	time	currenttime	currenttime_plus_ms	blocknum	trialnum	blockcode	trialcode	pretrialpause	posttrialpause	trialduration	trialtimeout	response	correct	latency	stimulusnumber1	stimulusitem1	stimulusonset1	stimulusnumber2	stimulusitem2	stimulusonset2	stimulusnumber3	stimulusitem3	stimulusonset3
-8	2023-03-31	10:57:12	10:57:36	10:57:36:651	2	1	fearreinstatement	fixation_fear	0	5	3500	0	0	1	2495	1	+	0	0	0	0	0	0	0
-8	2023-03-31	10:57:12	10:57:40	10:57:40:686	3	1	fearreinstatement	fixation_fear	0	5	4000	0	0	1	3495	1	+	0	0	0	0	0	0	0
-8	2023-03-31	10:57:12	10:57:45	10:57:45:217	4	1	fearreinstatement	fixation_fear	0	5	4500	0	0	1	3495	1	+	0	0	0	0	0	0	0
-8	2023-03-31	10:57:12	10:57:48	10:57:48:753	5	1	fearreinstatement	fixation_fear	0	5	3500	0	0	1	1495	1	+	0	0	0	0	0	0	0
-8	2023-03-31	10:57:12	10:58:05	10:58:05:973	6	1	valence_sound	valence_sound	0	5	0	0	10	0	17176	1	The last time you <b>experienced</b> the <b>unpleasant sound</b>,                       <b>how unpleasant</b> was your experience?	-16	0	0	0	0	0	0
