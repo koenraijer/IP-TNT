@@ -153,8 +153,9 @@ def load_data_and_combine(folder, desired_sampling_rate=64, verbose=False):
     combined_data, trimmings = load_data_and_combine(folder, desired_sampling_rate, verbose)
     """
 
-    file_names = ['ACC.csv', 'TEMP.csv', 'EDA.csv', 'BVP.csv']
+    file_names = ['ACC.csv', 'TEMP.csv', 'EDA.csv', 'BVP.csv', 'HR.csv', 'IBI.csv']
     data_frames = []
+    uniqueness_check = pd.DataFrame(columns=['file_path', 'file_name', 'starting_time', 'ending_time'])
     starting_times = []
     ending_times = []
 
@@ -163,6 +164,12 @@ def load_data_and_combine(folder, desired_sampling_rate=64, verbose=False):
         df = pd.read_csv(file_path, header=None)
 
         starting_time = df.iloc[0, 0]
+
+        # --- Handle IBI.csv ---
+        if file_name == 'IBI.csv':
+            # 
+            continue
+
         sampling_rate = int(df.iloc[1, 0])
         signal = df.iloc[2:, :].values
         
@@ -177,6 +184,10 @@ def load_data_and_combine(folder, desired_sampling_rate=64, verbose=False):
         signal_data = pd.DataFrame(signal_data)
 
         ending_time = starting_time + signal_data.shape[0] / desired_sampling_rate
+
+        uniqueness_check_child = pd.DataFrame([{'file_path': file_path, 'file_name': file_name, 'starting_time': starting_time, 'ending_time': ending_time}])
+        temp_list = [uniqueness_check, uniqueness_check_child]
+        uniqueness_check = pd.concat([df for df in temp_list if not df.empty], ignore_index=True).reset_index(drop=True)
 
         if verbose:
             print(f"File name: {file_name}, starting time: {starting_time}, ending time: {ending_time}, sampling rate: {sampling_rate}, signal shape: {signal.shape}")
@@ -194,7 +205,7 @@ def load_data_and_combine(folder, desired_sampling_rate=64, verbose=False):
     
     # Trim dataframes
     trimmed_data_frames, latest_start_time, earliest_end_time = trim_dataframes(data_frames, starting_times, ending_times, sr=desired_sampling_rate)
-    trimmings = max([df.shape[0] for df in data_frames]) - max([df.shape[0] for df in trimmed_data_frames])
+    trimmings = max([df.shape[0] for df in data_frames]) - max([df.shape[0] for df in trimmed_data_frames]) # Number of samples trimmed
 
     if verbose:
         print(f"latest_start_time: {latest_start_time}, earliest_end_time: {earliest_end_time}.")
@@ -217,7 +228,7 @@ def load_data_and_combine(folder, desired_sampling_rate=64, verbose=False):
     
     concatenated_df['source'] = file
 
-    return concatenated_df, trimmings
+    return concatenated_df, ibi_df, trimmings, uniqueness_check
 
 def trim_dataframes(data_frames, starting_times, ending_times, sr):
     """
