@@ -92,3 +92,66 @@ Useful ChatGPT output on filtering:
 
 *Options:* ([Peng, 2014/12](zotero://select/items/2_H8SKC8XR))
 - Fast Fourier transform (FFT) combining LMS (FFT-LMS) method
+- https://mne.tools/stable/auto_tutorials/preprocessing/40_artifact_correction_ica.html 
+
+NOTE: My earlier attempt at variable moving average was a very simple implementation of the statistical approach suggested by [Pollreisz, 2022-04-01](zotero://select/items/2_HQPF2BYJ).
+
+THIS WORKS: ([Zhang, 2/2015](zotero://select/items/2_5VJI7BHN)), specifically their advice applied to this code:
+[src](https://github.com/maryambayat-code/WAVELET-PPG/blob/main/waveletcodeforPPG.ipynb)
+```py
+from numpy import size
+coeff = pywt.wavedec(filterd2, wavelet='db2', level=3)
+```
+
+The advice:
+> "For example, when fs is 25 Hz instead of 125 Hz, the number of frequency bins, N , should take about 1/5 of the original value such that other parameters’ values (e.g. ∆s and ∆) maintain the same physical measures." 
+
+*My description of what I did:*
+Motion artifact detection was performed by deconstructing the signal into two frequency bins using wavelet decomposition. The number of frequency bins was chosen based on the heuristic that the number of frequency bins should be reduced by a factor `r` when the sampling frequency of the signal is reduced by factor `r`, first introduced in the paper by Zhang et al. (2015)[1]. The script then proceeds to threshold the first two sets of wavelet coefficients, leaving coefficients within a calculated threshold unchanged and modifying those outside the threshold using a function dependent on the threshold and a calculated parameter. These thresholded coefficients are subsequently used to reconstruct the signal via an inverse wavelet transform. Finally, the reconstructed signal is smoothed using a Savitzky-Golay filter, a type of low-pass filter effective for smoothing noisy data. The original, reconstructed, and smoothed signals are all plotted for visual comparison.
+
+### I COULD EXPAND IT WITH SPARSE SIGNAL RECONSTRUCTION
+
+Originally from TROIKA paper
+sparse signal reconstruction (SSR):
+Sources describing it:
+"[19] I. F. Gorodnitsky and B. D. Rao, “Sparse signal reconstruction from limited data using FOCUSS: a re-weighted minimum norm algorithm,” IEEE Trans. on Signal Processing, vol. 45, no. 3, pp. 600–616, 1997. [20] D. Donoho, “Compressed sensing,” IEEE Transactions on Information Theory, vol. 52, no. 4, pp. 1289–1306, 2006. [21] M. Elad, Sparse and Redundant Representations: From Theory to Applications in Signal and Image Processing. Springer, 2010."
+
+Examples from Github:
+- Done in Python: https://github.com/DingNingCN/OMP-algorithm-compressed-sensing/blob/main/3.OMP_Algorithm%20Reconstruction.ipynb
+- Done in Matlab: https://github.com/sachin-chandani/Heart-Rate-Monitoring-PPG
+- May also be relevant: https://github.com/leopoldjouffroy/Sparse-signal-reconstruction
+
+This just might have messed up the temporal relation of the data. Tt appears that, since the final wavelet is reconstructed from final_y, a list of the two frequency bins, they are simply added back together sequentially? In other words, it fucks up the temporal association of my data?
+
+Since I decompose the signal in 2 frequency domains.
+
+https://github.com/DingNingCN/OMP-algorithm-compressed-sensing/blob/main/3.OMP_Algorithm%20Reconstruction.ipynb <-- to continue at!!
+Or more advanced: https://www-sciencedirect-com.mu.idm.oclc.org/science/article/pii/S1746809422001549
+
+([Gaur, 2015](zotero://select/items/2_8M9MAVK8))
+
+**Sunday, 17 March 2024 13:31, written on Koen’s MacBook Air, at Geldersestraat 1, Sittard:**
+I've been trying to implement the X-LMS algorithm: 
+1. Bandpass filter with 4th order butterworth infinite impulse response filter (IIR) in the range 0.3 - 5 Hz, applied to the raw ppg signal. 
+2. Singular Value Decomposition (SVD) to generate a motion artifact reference for the adaptive filter. 
+3. Modified LMS adaptive filter, where the coefficients ($h(n)$) are updateda according to the least mean error ($e(n)$). An identical filter is placed in the reference signal path to adjust the weights. This adjustment is called X-LMS.
+
+Formulas:
+1. $y_c(n) = w^T(n) * u(n)$ : Output generation
+2. $e(n) = d(n) - y_C(n)$ : Error calculation
+3. $u_{C^*}(n) = \Sum_{i=0}^{I-1} c^*_i * u(n - i - M + 1)$
+4. $w(n+1) = w(n) + \mu * u_{C^*} (n)e(n)$ : Weight updates
+
+However, **signular value decomposition has proved to be way too computationally expensive**. In addition, Welhenge et al. stated that LMS algorithms are generally more effective than SVD-based algorithms. 
+
+Decided to start simpler and implement an LMS algorithm with the statistical score as reference signal ([Welhenge, 2019-02-04](zotero://select/items/2_VDUMGETB)). 
+([Wei, 2008-07-01](zotero://select/items/2_9QT7UHA3))
+
+> "Signals from all the axes (x, y and z) of the accelerometer are added together to generate the acceleration signal (ak). This takes the effects of noise on all three axes. This signal is represented with a FIR model. Using an adaptive filter, the FIR coefficients are derived [11]. The output is an estimate of the noise (^nk). This signal is then subtracted from the PPG signal (dk) which is the addition of the cardiac component (sk) and the noise component (nk) to get an estimate (ek) for the cardiac component. The adaptive filter continuously adjusts the filter coefficients. The purpose of this method is to minimize the error between nk and n^k. "
+
+For `padasip`: 
+> https://github.com/matousc89/Python-Adaptive-Signal-Processing-Handbook/blob/master/notebooks/padasip_adaptive_filters_basics.ipynb
+
+
+**Thursday, 21 March 2024 10:34, written on Koen’s MacBook Air, at Geldersestraat 1, Sittard:**
+In order to understand how much missing data I have without already calculating the feature set, I must set the IBI data at a fixed sampling rate (64 Hz). 

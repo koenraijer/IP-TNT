@@ -4,7 +4,9 @@ import re
 import pandas as pd
 import numpy as np
 import neurokit2 as nk
-import resampy 
+from datetime import datetime, timedelta
+
+from zmq import has
 
 def move_folders_to_root(root_path, current_path=None):
     """
@@ -126,85 +128,82 @@ def rename_folders(parent_folder):
             print(f"{original_name} -> {cleaned_name}")
             os.rename(item_path, cleaned_path)
 
-def load_data_and_combine(folder, desired_sampling_rate=64, verbose=False):
-    """
-    This function loads data from multiple CSV files in a given folder, resamples the data to a common sampling rate,
-    trims the data to a common time frame, and combines the data into a single pandas DataFrame.
+def load_csv_file(file_path):
+    df = pd.read_csv(file_path, header=None)
+    starting_time = df.iloc[0, 0]
+    sampling_rate = int(df.iloc[1, 0])
+    signal = df.iloc[2:, :].values
+    return starting_time, sampling_rate, signal
 
-    Parameters:
-    folder (str): The path to the folder containing the CSV files.
-    desired_sampling_rate (int, optional): The common sampling rate to which all data should be resampled. Default is 64.
-    verbose (bool, optional): If True, print additional information during the execution of the function. Default is False.
+def handle_ibi_file(file_path):
+    try:
+        df = pd.read_csv(file_path, header=None)
+    except pd.errors.EmptyDataError:
+        print(f"Skipping {file_path} because it is empty.")
+        return pd.DataFrame(), None, None
 
-    Returns:
-    pandas.DataFrame: A DataFrame containing the combined data from all CSV files. Each file's data is in a column named
-    after the file (with '.csv' removed), except for 'ACC.csv', which is split into three columns: 'acc_x', 'acc_y', and 'acc_z'.
-    The DataFrame also includes a 'datetime' column with the time in datetime format, a 'unix_time' column with the time in Unix timestamp format,
-    and a 'source' column containing the folder name.
+    if df.shape[0] < 2:
+        print(f"Skipping {file_path} due to insufficient signal length.")
+        return pd.DataFrame(), None, None
+    
+    ibi_df = pd.DataFrame(columns=['ibi', 'delta_t', 'datetime', 'unix_time', 'source'])
+    ibi_df['ibi'] = df.iloc[1:, 1]
+    ibi_df['delta_t'] = df.iloc[1:, 0]
 
-    Note:
-    The function expects each CSV file to have the starting time as the first row, the sampling rate as the second row,
-    and the signal data starting from the third row. If the signal length is less than 3, the file is skipped.
+    starting_time = df.iloc[0, 0].astype(int)
+    ending_time = starting_time + ibi_df['delta_t'].sum()
 
-    Example usage:
-    folder = '/path/to/folder'
-    desired_sampling_rate = 64
-    verbose = True
-    combined_data, trimmings = load_data_and_combine(folder, desired_sampling_rate, verbose)
-    """
+    starting_datetime = datetime.fromtimestamp(starting_time)
+    ibi_df['datetime'] = [starting_datetime + timedelta(seconds=delta_t) for delta_t in ibi_df['delta_t']]
+    ibi_df['unix_time'] = starting_time + ibi_df['delta_t']
 
-    file_names = ['ACC.csv', 'TEMP.csv', 'EDA.csv', 'BVP.csv', 'HR.csv', 'IBI.csv']
+    ibi_df.drop(columns='delta_t', inplace=True)
+    file = file_path.split('/')[-2]
+    ibi_df['source'] = file
+
+    return ibi_df, starting_time, ending_time
+
+def handle_other_files(file_path, desired_sampling_rate):
+    starting_time, sampling_rate, signal = load_csv_file(file_path)
+    if signal.shape[0] < 3:
+        print(f"Skipping {file_path} due to insufficient signal length.")
+        return None, None, None
+    signal_data = nk.signal_resample(signal, sampling_rate=sampling_rate, desired_sampling_rate=desired_sampling_rate, method="FFT")
+    signal_data = pd.DataFrame(signal_data)
+    ending_time = starting_time + signal_data.shape[0] / desired_sampling_rate
+    return signal_data, starting_time, ending_time
+
+def load_data_and_combine(folder, desired_sampling_rate=64, verbose=False, useIBI = False):
+    has_ibi = False
+    file_names_except_ibi = ['ACC.csv', 'TEMP.csv', 'EDA.csv', 'BVP.csv', 'HR.csv']
     data_frames = []
     uniqueness_check = pd.DataFrame(columns=['file_path', 'file_name', 'starting_time', 'ending_time'])
     starting_times = []
     ending_times = []
 
-    for file_name in file_names:
+    for file_name in file_names_except_ibi:
         file_path = os.path.join(folder, file_name)
-        df = pd.read_csv(file_path, header=None)
-
-        starting_time = df.iloc[0, 0]
-
-        # --- Handle IBI.csv ---
-        if file_name == 'IBI.csv':
-            # 
+        data, starting_time, ending_time = handle_other_files(file_path, desired_sampling_rate)
+        if data is None:
             continue
-
-        sampling_rate = int(df.iloc[1, 0])
-        signal = df.iloc[2:, :].values
-        
-        # Check if the signal length is large enough
-        if signal.shape[0] < 3:
-            print(f"Skipping {file_name} in {folder} due to insufficient signal length.")
-            continue
-        
-        # Resample signal to desired_sampling_rate
-        signal_data = nk.signal_resample(signal, sampling_rate=sampling_rate, desired_sampling_rate=desired_sampling_rate, method="FFT")
-        
-        signal_data = pd.DataFrame(signal_data)
-
-        ending_time = starting_time + signal_data.shape[0] / desired_sampling_rate
-
-        uniqueness_check_child = pd.DataFrame([{'file_path': file_path, 'file_name': file_name, 'starting_time': starting_time, 'ending_time': ending_time}])
-        temp_list = [uniqueness_check, uniqueness_check_child]
-        uniqueness_check = pd.concat([df for df in temp_list if not df.empty], ignore_index=True).reset_index(drop=True)
-
-        if verbose:
-            print(f"File name: {file_name}, starting time: {starting_time}, ending time: {ending_time}, sampling rate: {sampling_rate}, signal shape: {signal.shape}")
-
-        # Set column names
         if file_name == 'ACC.csv':  # Handle the ACC.csv file with 3 columns
-            signal_data.columns = ['acc_x', 'acc_y', 'acc_z']
+            data.columns = ['acc_x', 'acc_y', 'acc_z']
         else:
             column_name = file_name.lower().replace('.csv', '')
-            signal_data.columns = [column_name]
+            data.columns = [column_name]
 
         starting_times.append(starting_time)
         ending_times.append(ending_time)
-        data_frames.append(signal_data)
+        data_frames.append(data)
     
+    ibi_df, starting_time, ending_time = handle_ibi_file(os.path.join(folder, 'IBI.csv'))
+    if useIBI is True and not ibi_df.empty:
+        starting_times.append(starting_time)
+        ending_times.append(ending_time)
+        has_ibi = True
+
     # Trim dataframes
-    trimmed_data_frames, latest_start_time, earliest_end_time = trim_dataframes(data_frames, starting_times, ending_times, sr=desired_sampling_rate)
+    trimmed_data_frames, trimmed_ibi_df, latest_start_time, earliest_end_time = trim_dataframes(data_frames, ibi_df, starting_times, ending_times, sr=desired_sampling_rate, has_ibi=has_ibi)
     trimmings = max([df.shape[0] for df in data_frames]) - max([df.shape[0] for df in trimmed_data_frames]) # Number of samples trimmed
 
     if verbose:
@@ -227,22 +226,11 @@ def load_data_and_combine(folder, desired_sampling_rate=64, verbose=False):
     file = folder.split('/')[-1]
     
     concatenated_df['source'] = file
+    ibi_df['source'] = file
+    
+    return concatenated_df, trimmed_ibi_df, trimmings, uniqueness_check
 
-    return concatenated_df, ibi_df, trimmings, uniqueness_check
-
-def trim_dataframes(data_frames, starting_times, ending_times, sr):
-    """
-    Trim the given data frames based on the starting and ending times.
-
-    Args:
-        data_frames (list): A list of pandas DataFrames to be trimmed.
-        starting_times (list): A list of starting times for each DataFrame.
-        ending_times (list): A list of ending times for each DataFrame.
-        sr (int): The sampling rate of the data.
-
-    Returns:
-        tuple: A tuple containing the trimmed data frames, the latest start time, and the earliest end time.
-    """
+def trim_dataframes(data_frames, ibi_df, starting_times, ending_times, sr, has_ibi):
     latest_start_time = max(starting_times)
     earliest_end_time = min(ending_times)
 
@@ -253,5 +241,11 @@ def trim_dataframes(data_frames, starting_times, ending_times, sr):
         df_trimmed = df.iloc[start_idx:end_idx, :]
         trimmed_data_frames.append(df_trimmed)
 
-    return trimmed_data_frames, latest_start_time, earliest_end_time
+    # Trim ibi_df
+    if has_ibi:
+        trimmed_ibi_df = ibi_df[(ibi_df['unix_time'] >= latest_start_time) & (ibi_df['unix_time'] <= earliest_end_time)]
+    else:
+        trimmed_ibi_df = None
+        
+    return trimmed_data_frames, trimmed_ibi_df, latest_start_time, earliest_end_time
 
