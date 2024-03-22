@@ -31,18 +31,18 @@
 - [Efficient envelope-based PPG denoising algorithm](https://www.sciencedirect.com/science/article/pii/S1746809423011266) <-- seems like a low-resource, interpretable option.
 
 *Matching anonymous data files to participants:*
-  - `d1 2` - Wednesday April 12, 2023 16:16:54 (pm) - Possibly: pp13 or pp14
-  - `d1_1` - Wednesday April 12, 2023 14:12:58 (pm) - Possibly: pp13 or pp14
-  - `1681713254_A03F6E` - Monday April 17, 2023 08:34:14 (am) - Possibly: pp16 or pp17
-  - `1681717717_A03F6E` - Monday April 17, 2023 09:48:37 (am) - Possibly: pp16 or pp17
-  - `d1_3` - Tuesday April 18, 2023 15:05:05 (pm) - Possibly: pp16 or pp17 or pp18
-  - `d2_1_1` - Tuesday April 18, 2023 11:46:43 (am) - Possibly: pp16 or pp17 or pp18
-  - `d2_2` - Tuesday April 18, 2023 16:32:11 (pm) - Possibly: pp16 or pp17 or pp18
-  - `d1` - Wednesday April 19, 2023 12:59:55 (pm) - Possibly: pp18 or pp19 or pp20
-  - `d1_4` - Wednesday April 19, 2023 14:17:17 (pm) - Possibly: pp18 or pp19 or pp20
-  - `d2` - Wednesday April 19, 2023 15:43:14 (pm) - Possibly: pp18 or pp19 or pp20
-  - `d2_1` - Thursday April 20, 2023 09:20:35 (am) - Possibly: pp19 or pp20
-  - `d2_4` - Thursday April 20, 2023 12:31:20 (pm) - Possibly: pp19 or pp20
+  - `d1 2` - Wednesday April 12, 2023 16:16:54 (pm) - pp15
+  - `d1_1` - Wednesday April 12, 2023 14:12:58 (pm) - pp13
+  - `1681713254_A03F6E` - Monday April 17, 2023 08:34:14 (am) - pp16
+  - `1681717717_A03F6E` - Monday April 17, 2023 09:48:37 (am) - pp17
+  - `d1_3` - Tuesday April 18, 2023 15:05:05 (pm) - pp18
+  - `d2_1_1` - Tuesday April 18, 2023 11:46:43 (am) - pp17
+  - `d2_2` - Tuesday April 18, 2023 16:32:11 (pm) - pp16
+  - `d1` - Wednesday April 19, 2023 12:59:55 (pm) - pp19
+  - `d1_4` - Wednesday April 19, 2023 14:17:17 (pm) - pp20
+  - `d2` - Wednesday April 19, 2023 15:43:14 (pm) - pp18
+  - `d2_1` - Thursday April 20, 2023 09:20:35 (am) - pp19
+  - `d2_4` - Thursday April 20, 2023 12:31:20 (pm) - pp20
 
 Note: matching was done using the questionnaire, I still need to use the excel file for the ParticipantOverview. 
 
@@ -154,4 +154,9 @@ For `padasip`:
 
 
 **Thursday, 21 March 2024 10:34, written on Koen’s MacBook Air, at Geldersestraat 1, Sittard:**
-In order to understand how much missing data I have without already calculating the feature set, I must set the IBI data at a fixed sampling rate (64 Hz). 
+In order to understand how much missing data I have without already calculating the feature set, I must set the IBI data at a fixed sampling rate (64 Hz). I did that and calculated 
+
+**Friday, 22 March 2024 16:33, written on Koen’s MacBook Air, at Bolksbeekstraat 29bis, Utrecht:**
+- The question is about which dataset I'm going to use: `df['intrusion]`, `df['intrusion_nothink]`, or `df['intrusion_tnt']`. The deciding factor here is which dataset is going to have most discriminatory ability. Marijn thinks this will be `intrusion_nothink` because successful nothink trials are more different from intrusions (i.e., failed nothink trials) than intrusions are different from think trials, becuase in the latter case, both constitute a thought. However, I am inclined to think that the negative valence aspect that succesful and failed nothink trials share makes them more similar. 
+- Another question is: to what degree does it work to engineer additional statistical features from domain-specific features. For example, calculating SD for SCL calculated from EDA. 
+- I used NeuroKit2 to calculate EDA features and have decided that 
