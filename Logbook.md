@@ -159,4 +159,5 @@ In order to understand how much missing data I have without already calculating 
 **Friday, 22 March 2024 16:33, written on Koen’s MacBook Air, at Bolksbeekstraat 29bis, Utrecht:**
 - The question is about which dataset I'm going to use: `df['intrusion]`, `df['intrusion_nothink]`, or `df['intrusion_tnt']`. The deciding factor here is which dataset is going to have most discriminatory ability. Marijn thinks this will be `intrusion_nothink` because successful nothink trials are more different from intrusions (i.e., failed nothink trials) than intrusions are different from think trials, becuase in the latter case, both constitute a thought. However, I am inclined to think that the negative valence aspect that succesful and failed nothink trials share makes them more similar. 
 - Another question is: to what degree does it work to engineer additional statistical features from domain-specific features. For example, calculating SD for SCL calculated from EDA. 
-- I used NeuroKit2 to calculate EDA features and have decided that 
+- I used NeuroKit2 to calculate EDA features.
+- SMOTE: 1:1 class distribution led to serious overfitting. Tried 1:2 ratio. 
