@@ -161,3 +161,4 @@ In order to understand how much missing data I have without already calculating 
 - Another question is: to what degree does it work to engineer additional statistical features from domain-specific features. For example, calculating SD for SCL calculated from EDA. 
 - I used NeuroKit2 to calculate EDA features.
 - SMOTE: 1:1 class distribution led to serious overfitting. Tried 1:2 ratio. 
+- Take this course? https://campus.datacamp.com/courses/extreme-gradient-boosting-with-xgboost/classification-with-xgboost?ex=2 
