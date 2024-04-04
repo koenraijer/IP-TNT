@@ -1,6 +1,15 @@
 import os 
 import pandas as pd
+import numpy as np
 from datetime import timedelta
+from sklearn.metrics import f1_score, average_precision_score, roc_auc_score
+from sklearn.model_selection import GroupShuffleSplit
+from sklearn.impute import KNNImputer
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import GroupKFold
+from imblearn.over_sampling import SMOTE
+from imblearn.under_sampling import RandomUnderSampler
+from imblearn.pipeline import Pipeline
 
 def get_dir_list(path):
     """
@@ -87,3 +96,123 @@ def closest_timestamp(empatica_ts, inquisit_timestamps):
         float: The closest Inquisit timestamp.
     """
     return min(inquisit_timestamps, key=lambda x: abs(x - empatica_ts))
+
+def prepare_datasets(filename, test_size=0.2, val_size=0.1, oversample_ratio=0.25, undersample_ratio=0.25, oversample=False):
+    # Data loading
+    df = pd.read_csv(filename)
+    df['datetime'] = pd.to_datetime(df['datetime'])
+    df.drop(['datetime', 'unix_time', 'source', 'response', 'intrusion', 'intrusion_nothink', 'trialcode', 'session_id'], axis=1, inplace=True)
+
+    participants = df['participant']
+    X = df.drop(['intrusion_tnt', 'participant'], axis=1)  # Features: All columns except 'intrusion_tnt' and 'participant'
+    y = df['intrusion_tnt']  # Labels: 'intrusion_tnt' column
+
+    # Create train/test split
+    gss = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=42)
+    train_idx, test_idx = next(gss.split(X, y, groups=participants))
+    X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
+    y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
+
+    # Create train/validation split
+    gss = GroupShuffleSplit(n_splits=1, test_size=val_size/(1-test_size), random_state=42)
+    train_wval_idx, val_idx = next(gss.split(X_train, y_train, groups=participants.iloc[train_idx]))
+    X_train, X_val = X_train.iloc[train_wval_idx], X_train.iloc[val_idx]
+    y_train, y_val = y_train.iloc[train_wval_idx], y_train.iloc[val_idx]
+
+    # Impute missing values
+    knn_imputer = KNNImputer(n_neighbors=5)
+    knn_imputer.fit(X_train)
+    X_train = pd.DataFrame(knn_imputer.transform(X_train), columns=X_train.columns)
+    X_val = pd.DataFrame(knn_imputer.transform(X_val), columns=X_val.columns)
+    X_test = pd.DataFrame(knn_imputer.transform(X_test), columns=X_test.columns)
+
+    if oversample:
+        # Define the resampling strategy
+        over = SMOTE(random_state=42, sampling_strategy=oversample_ratio)
+        under = RandomUnderSampler(sampling_strategy=undersample_ratio)
+        steps = [('o', over), ('u', under)]
+        pipeline = Pipeline(steps=steps)
+        # Fit the SMOTE instance on the training data
+        X_train, y_train = pipeline.fit_resample(X_train, y_train)
+
+    # Normalize the data
+    scaler = StandardScaler()
+    scaler.fit(X_train)
+    X_train = pd.DataFrame(scaler.transform(X_train), columns=X_train.columns)
+    X_val = pd.DataFrame(scaler.transform(X_val), columns=X_val.columns)
+    X_test = pd.DataFrame(scaler.transform(X_test), columns=X_test.columns)
+
+    # Recombine the training and validation sets for cross-validation
+    X_train_val = np.concatenate((X_train, X_val), axis=0)
+    y_train_val = np.concatenate((y_train, y_val), axis=0)
+
+    feature_names = X.columns.tolist()
+
+    # Print lengths of the datasets
+    print(f"Training set: {len(X_train)} samples")
+    print(f"Validation set: {len(X_val)} samples")
+    print(f"Training + Validation set: {len(X_train_val)} samples")
+    print(f"Test set: {len(X_test)} samples")
+
+    return X_train, y_train, X_val, y_val, X_test, y_test, X_train_val, y_train_val, train_idx, train_wval_idx, val_idx, test_idx, df, feature_names, participants
+
+def create_folds(X_train, y_train, groups, n_folds=10):
+    """
+    Create folds for cross-validation using GroupKFold.
+
+    Parameters:
+    - X_train (array-like): The input features for training.
+    - y_train (array-like): The target variable for training.
+    - groups (array-like): The groups to be used for grouping the samples.
+    - n_folds (int): The number of folds to create (default=10).
+
+    Returns:
+    - folds (list): A list of tuples containing train and test indices for each fold.
+    """
+
+    # Create GroupKFold object
+    gkf = GroupKFold(n_splits=n_folds)
+
+    # Folds must be a list of tuples of train and test indices
+    folds = []
+    for train_index, test_index in gkf.split(X_train, y_train, groups):
+        folds.append((train_index.tolist(), test_index.tolist()))
+
+    # Print length of each sublist
+    print("Folds created:")
+    for fold in folds:
+        print(f"Train: {len(fold[0])}, Eval: {len(fold[1])}")
+
+    return folds
+
+def get_eval(y_test, y_pred):
+    """
+    Calculate evaluation metrics for binary classification.
+
+    Parameters:
+    - y_test (array-like): True labels.
+    - y_pred (array-like): Predicted labels.
+
+    Returns:
+    - report (dict): Dictionary containing evaluation metrics.
+    - string (str): String representation of evaluation metrics.
+    """
+    f1_micro = f1_score(y_test, y_pred, average='micro')
+    aucpr = average_precision_score(y_test, y_pred)
+    auc = roc_auc_score(y_test, y_pred)
+    report = {
+        'F1 Score (micro)': f1_micro,
+        'AUCPR': aucpr,
+        'AUC': auc
+    }
+    string = f'F1 Score (micro): {f1_micro:.2f}\nAUCPR: {aucpr:.2f}\nAUC: {auc:.2f}'
+    return report, string
+
+def xgb_micro_f1(preds, dtrain):
+    labels = dtrain.get_label()
+    preds = np.round(preds)
+    return 'micro_f1', -f1_score(labels, preds, average='micro')
+
+def xgb_aucpr(preds, dtrain):
+    labels = dtrain.get_label()
+    return 'aucpr', -average_precision_score(labels, preds)

@@ -1,4 +1,4 @@
-**Wednesday, 13 March 2024 11:36, written on Koen’s MacBook Air, at Westelijke Randweg 50, Geleen:**
+## Wednesday, 13 March 2024 11:36, written on Koen’s MacBook Air, at Westelijke Randweg 50, Geleen:
 *Thoughts:*
 - Per Marijn's recommendation, tested [MNE.tools](https://mne.tools/stable/index.html). I found that MNE is mainly meant for EEG/MEG/ECG signals. Not so much for physiological signals.
 - Per Hunor's recommendation, looked at [NeuroKit](https://neuropsychology.github.io/NeuroKit/functions/ppg.html). This looks much more promising, offering specific functions for PPG and EDA data.
@@ -19,7 +19,7 @@
 - Match all data files with participant demographics.
 
 ---
-**Thursday, 14 March 2024 09:09, written on Koen’s MacBook Air, at Geldersestraat 2, Sittard:**
+## Thursday, 14 March 2024 09:09, written on Koen’s MacBook Air, at Geldersestraat 2, Sittard:
 - Perhaps there is a reason wrist-worn wearables, for example by Garmin, don't present HRV measures. I might need to stick to statistical measures of HR. 
 
 *Artifact detection options:*
@@ -81,7 +81,7 @@ Useful ChatGPT output on filtering:
   - I might not have another option than use Empatica's close-source/proprietory code-generated data (e.g., IBI.csv and HR.csv). 
   - It will allow me to focus on problems more relevant to my thesis. 
 
-**Saturday, 16 March 2024 09:13, written on Koen’s MacBook Air, at Geldersestraat 1, Sittard:**
+## Saturday, 16 March 2024 09:13, written on Koen’s MacBook Air, at Geldersestraat 1, Sittard:
 - Let's take a step back and look at what others did to preprocess Empatica data. I've found no other Empatica-specific packages who calculate the inter-beat intervals from scratch.  
 - Including the ibi data:
   - Number of folders with no IBI data: 17 / 67
@@ -130,7 +130,7 @@ Or more advanced: https://www-sciencedirect-com.mu.idm.oclc.org/science/article/
 
 ([Gaur, 2015](zotero://select/items/2_8M9MAVK8))
 
-**Sunday, 17 March 2024 13:31, written on Koen’s MacBook Air, at Geldersestraat 1, Sittard:**
+## Sunday, 17 March 2024 13:31, written on Koen’s MacBook Air, at Geldersestraat 1, Sittard:
 I've been trying to implement the X-LMS algorithm: 
 1. Bandpass filter with 4th order butterworth infinite impulse response filter (IIR) in the range 0.3 - 5 Hz, applied to the raw ppg signal. 
 2. Singular Value Decomposition (SVD) to generate a motion artifact reference for the adaptive filter. 
@@ -153,12 +153,73 @@ For `padasip`:
 > https://github.com/matousc89/Python-Adaptive-Signal-Processing-Handbook/blob/master/notebooks/padasip_adaptive_filters_basics.ipynb
 
 
-**Thursday, 21 March 2024 10:34, written on Koen’s MacBook Air, at Geldersestraat 1, Sittard:**
+## Thursday, 21 March 2024 10:34, written on Koen’s MacBook Air, at Geldersestraat 1, Sittard:
 In order to understand how much missing data I have without already calculating the feature set, I must set the IBI data at a fixed sampling rate (64 Hz). I did that and calculated 
 
-**Friday, 22 March 2024 16:33, written on Koen’s MacBook Air, at Bolksbeekstraat 29bis, Utrecht:**
+## Friday, 22 March 2024 16:33, written on Koen’s MacBook Air, at Bolksbeekstraat 29bis, Utrecht:
 - The question is about which dataset I'm going to use: `df['intrusion]`, `df['intrusion_nothink]`, or `df['intrusion_tnt']`. The deciding factor here is which dataset is going to have most discriminatory ability. Marijn thinks this will be `intrusion_nothink` because successful nothink trials are more different from intrusions (i.e., failed nothink trials) than intrusions are different from think trials, becuase in the latter case, both constitute a thought. However, I am inclined to think that the negative valence aspect that succesful and failed nothink trials share makes them more similar. 
 - Another question is: to what degree does it work to engineer additional statistical features from domain-specific features. For example, calculating SD for SCL calculated from EDA. 
 - I used NeuroKit2 to calculate EDA features.
 - SMOTE: 1:1 class distribution led to serious overfitting. Tried 1:2 ratio. 
 - Take this course? https://campus.datacamp.com/courses/extreme-gradient-boosting-with-xgboost/classification-with-xgboost?ex=2 
+- Then optimise the XGBoost finetuning process.
+ 
+## Saturday, 30 March 2024 15:48, written on Koen’s MacBook Air, at Bolksbeekstraat 27, Utrecht:
+### Data augmentation
+Short literature review on conditional recurrent GANs:
+- ([Nikolaidis, 2019-05-22](zotero://select/items/1_72NRYTCY)). Inspired by Esteban et al., no source code available. Focusses on application of synthetic data.
+- ([Esteban, 2017-12-03](zotero://select/items/2_DHLZEJRV)) --> source code: https://github.com/ratschlab/RGAN. Original paper.
+- [Conditional GAN using TorchGAN](https://torchgan.readthedocs.io/en/latest/modules/models.html?highlight=conditional#conditional-gan)
+
+Training GANs appears to be very hard: https://webcache.googleusercontent.com/search?q=cache:https://towardsdatascience.com/10-lessons-i-learned-training-generative-adversarial-networks-gans-for-a-year-c9071159628&sca_esv=ff0dae4b23f8bbed&sca_upv=1&strip=1&vwsrc=0. 
+
+([Pascual, 2021-08](zotero://select/items/2_G8J8UDV6))
+
+Variational AutoEncoders might be a better idea to try first? 
+https://avandekleut.github.io/vae/ 
+
+Some sources on TimeVAE:
+- https://github.com/abudesai/timeVAE 
+
+## Sundary, 31 March 2024, 9:26, written on Koen's MacBook Air, somewhere in Flevoland
+### Choice of window length
+```
+Trial (±  9sec)
+1.	Fix cross random between 0.5 – 1.5 seconds
+2.	Think or No-Think instruction presented for 1 sec  
+3.	NT Stimuli presented for 5 sec, Think Stimuli presented for 5 s
+4.	Intrusion rating 3 sec 
+5.	Black screen random between 0.5 – 1.5 seconds
+```
+
+Based on the experimental design, in the most conservative scenario, the user answered the intrusion rating at most <8 seconds after having had the intrusion, for this is when the stimulus was presented the earliest. Thus, a window length of 8 seconds appears to be the best choice. 
+
+There is no performance difference between 10s and 8s time window length (both F1-score of 0.91 after Bayesian hyperparameter optimisation). 
+
+### TimeVAE
+TimeVAE seems to be a good option. One problem I'm facing is: how best to structure the input data for the VAE? 
+It appears to me to make most sense to train 2 VAE's, one for each decision class (1 or 0). Each input to the VAE will consist of length 512 (win=8, sr=64), with all non-windowed features as input, and batch size as hyperparameter. 
+
+### Hyperparameter tuning 
+A more general point I'm struggling with:
+- Hyperparameters occur at different points in the model-building process. Window length, for example, occurs at a very different point in time than setting the sampling rate to which all data is resampled, or than setting lambda for L2 regularisation during XGB training. 
+- An optimal window length for one XGB may not be an optimal window length for another. 
+- How to optimise all these hyperparameters occurring at different points in the modelling process at the same time?
+
+The solution is building a single unified pipeline that can be used for Bayesian hyperparameter optimisation, which takes pre-windowed data, and takes a hyperparameter space as input which includes window size, and then iteratively creates datasets with different window sizes, combining them with different hyperparameter settings. 
+
+## Monday, 01 April 2024, 14:20, written on Koen's MacBook Air, somewhere in Gelderland
+Another question I have is: how to combine hyperparameter tuning with cross-validation and feature selection?
+
+Some preliminary answers:
+- Nested cross-validation IS relevant to estimate generalisability of the dataset/problem, but not for simultaneous hyperparameter tuning/model selection.
+
+(src: https://stackoverflow.com/questions/52408949/cross-validation-and-parameters-tuning-with-xgboost-and-hyperopt, https://stackoverflow.com/questions/52138897/fitting-in-nested-cross-validation-with-cross-val-score-with-pipeline-and-gridse/52147410#52147410)
+
+A package that does both is [shap-hypetune](https://github.com/cerlymarco/shap-hypetune). 
+
+**Tuesday, 02 April 2024 10:11, written on Koen’s MacBook Air, at Geldersestraat 1, Sittard:**
+TO DO: 
+- remove common-sense wrong intrusions. I.e., intrusions that are less than or equal to 3s apart cannot be (due to trial length). 
+- Do within-person normalisation of raw features
+- See what happens when intrusions are defined more strictly (e.g. only "often" classifies as an intrusion). 
