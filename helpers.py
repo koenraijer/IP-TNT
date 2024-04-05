@@ -180,7 +180,7 @@ def preprocess_data(df = None, filename='output/empatica_inquisit_merged.csv', s
     return df
 
 def get_features(df = None, filename='output/ei_prep.csv', s=8, sr=64, save=False, reference_class='tnt'):
-    print('Engineering features...')
+    print(f'Engineering features... (window size: {s}s, reference class: {reference_class})')
     # Meant for 'output/combined_feature_engineered_tnt_only.csv'
     # Data loading
     if df is None:
@@ -194,54 +194,14 @@ def get_features(df = None, filename='output/ei_prep.csv', s=8, sr=64, save=Fals
     # Group by 'session_id'
     temp = df.groupby('session_id')
 
-    # EDA
-    # EDA Tonic
-    df['eda_tonic_mean'] = temp['eda_tonic'].rolling(window=win).mean().reset_index(0, drop=True)
-    df['eda_tonic_std'] = temp['eda_tonic'].rolling(window=win).std().reset_index(0, drop=True)
-    df['eda_tonic_min'] = temp['eda_tonic'].rolling(window=win).min().reset_index(0, drop=True)
-    df['eda_tonic_max'] = temp['eda_tonic'].rolling(window=win).max().reset_index(0, drop=True)
-    df['eda_tonic_skew'] = temp['eda_tonic'].rolling(window=win).skew().reset_index(0, drop=True)
-    df['eda_tonic_kurt'] = temp['eda_tonic'].rolling(window=win).kurt().reset_index(0, drop=True)
+    shift_val = -(win - 8*sr) # Shifts the label to the left by the window size in excess of 8 seconds, so the label is always 8s to the right of the left window edge, and the remainder of the window is to the right of the label. 
 
-    # EDA Phasic
-    df['eda_phasic_mean'] = temp['eda_phasic'].rolling(window=win).mean().reset_index(0, drop=True)
-    df['eda_phasic_std'] = temp['eda_phasic'].rolling(window=win).std().reset_index(0, drop=True)
-    df['eda_phasic_min'] = temp['eda_phasic'].rolling(window=win).min().reset_index(0, drop=True)
-    df['eda_phasic_max'] = temp['eda_phasic'].rolling(window=win).max().reset_index(0, drop=True)
-    df['eda_phasic_skew'] = temp['eda_phasic'].rolling(window=win).skew().reset_index(0, drop=True)
-    df['eda_phasic_kurt'] = temp['eda_phasic'].rolling(window=win).kurt().reset_index(0, drop=True)
+    columns = ['eda_tonic', 'eda_phasic', 'body_acc', 'temp', 'hr', 'bvp']
+    operations = ['mean', 'std', 'min', 'max', 'skew', 'kurt']
 
-    # ACCELEROMETER
-    df['body_acc_mean'] = temp['body_acc'].rolling(window=win).mean().reset_index(0, drop=True)
-    df['body_acc_std'] = temp['body_acc'].rolling(window=win).std().reset_index(0, drop=True)
-    df['body_acc_min'] = temp['body_acc'].rolling(window=win).min().reset_index(0, drop=True)
-    df['body_acc_max'] = temp['body_acc'].rolling(window=win).max().reset_index(0, drop=True)
-    df['body_acc_skew'] = temp['body_acc'].rolling(window=win).skew().reset_index(0, drop=True)
-    df['body_acc_kurt'] = temp['body_acc'].rolling(window=win).kurt().reset_index(0, drop=True)
-
-    # TEMPERATURE
-    df['temp_mean'] = temp['temp'].rolling(window=win).mean().reset_index(0, drop=True)
-    df['temp_std'] = temp['temp'].rolling(window=win).std().reset_index(0, drop=True)
-    df['temp_min'] = temp['temp'].rolling(window=win).min().reset_index(0, drop=True)
-    df['temp_max'] = temp['temp'].rolling(window=win).max().reset_index(0, drop=True)
-    df['temp_skew'] = temp['temp'].rolling(window=win).skew().reset_index(0, drop=True)
-    df['temp_kurt'] = temp['temp'].rolling(window=win).kurt().reset_index(0, drop=True)
-
-    # HEART RATE
-    df['hr_mean'] = temp['hr'].rolling(window=win).mean().reset_index(0, drop=True)
-    df['hr_std'] = temp['hr'].rolling(window=win).std().reset_index(0, drop=True)
-    df['hr_min'] = temp['hr'].rolling(window=win).min().reset_index(0, drop=True)
-    df['hr_max'] = temp['hr'].rolling(window=win).max().reset_index(0, drop=True)
-    df['hr_skew'] = temp['hr'].rolling(window=win).skew().reset_index(0, drop=True)
-    df['hr_kurt'] = temp['hr'].rolling(window=win).kurt().reset_index(0, drop=True)
-
-    # BVP
-    df['bvp_mean'] = temp['bvp'].rolling(window=win).mean().reset_index(0, drop=True)
-    df['bvp_std'] = temp['bvp'].rolling(window=win).std().reset_index(0, drop=True)
-    df['bvp_min'] = temp['bvp'].rolling(window=win).min().reset_index(0, drop=True)
-    df['bvp_max'] = temp['bvp'].rolling(window=win).max().reset_index(0, drop=True)
-    df['bvp_skew'] = temp['bvp'].rolling(window=win).skew().reset_index(0, drop=True)
-    df['bvp_kurt'] = temp['bvp'].rolling(window=win).kurt().reset_index(0, drop=True)
+    for col in columns:
+        for op in operations:
+            df[f'{col}_{op}'] = temp[col].shift(shift_val).rolling(window=win).agg(op).reset_index(0, drop=True)
 
     if reference_class == 'tnt':
         # Only keep rows that dont have nan for intrusion_tnt 
@@ -270,8 +230,9 @@ def get_features(df = None, filename='output/ei_prep.csv', s=8, sr=64, save=Fals
     print('Feature engineering done!')
     return df
     
-def prepare_datasets(df = None, filename = 'output/combined_feature_engineered_tnt_only_win8.csv', test_size=0.2, val_size=0.1):
-    print("Preparing datasets...")
+def prepare_datasets(df = None, filename = 'output/dataset_tnt_win8.csv', test_size=0.2, val_size=0.1, verbose = True):
+    if verbose:
+        print("Preparing datasets...")
     if df is None:
         df = pd.read_csv(filename)
 
@@ -308,10 +269,11 @@ def prepare_datasets(df = None, filename = 'output/combined_feature_engineered_t
     feature_names = X.columns.tolist()
 
     # Print lengths of the datasets
-    print(f"Training set: {len(X_train)} rows of features, {len(y_train)} labels")
-    print(f"Validation set: {len(X_val)} rows of features, {len(y_val)} labels")
-    print(f"Training + Validation set: {len(X_train_val)} rows of features, {len(y_train_val)} labels")
-    print(f"Test set: {len(X_test)} rows of features, {len(y_test)} labels")
+    if verbose:
+        print(f"Training set: {len(X_train)} rows of features, {len(y_train)} labels")
+        print(f"Validation set: {len(X_val)} rows of features, {len(y_val)} labels")
+        print(f"Training + Validation set: {len(X_train_val)} rows of features, {len(y_train_val)} labels")
+        print(f"Test set: {len(X_test)} rows of features, {len(y_test)} labels")
 
     return X_train, y_train, X_val, y_val, X_test, y_test, X_train_val, y_train_val, train_idx, train_wval_idx, val_idx, test_idx, df, feature_names, participants
 
@@ -364,21 +326,34 @@ def plot_metrics(y_val, y_pred, model, X_val):
     plt.show()
 
     # AUPRC curve
-    precision, recall, thresholds = precision_recall_curve(y_val, model.predict_proba(X_val)[:,1])
-    auc_score = auc(recall, precision)
+    precision, recall, thresholds_auprc = precision_recall_curve(y_val, model.predict_proba(X_val)[:,1])
+    auprc_score = auc(recall, precision)
     plt.plot(recall, precision, marker='.', label='XGBoost')
     plt.xlabel('Recall')
     plt.ylabel('Precision')
-    plt.title('Precision-Recall Curve: AUC = {:.2f}'.format(auc_score))
+    plt.title('Precision-Recall Curve: AUC = {:.2f}'.format(auprc_score))
     plt.legend()
     plt.show()
 
-    # ROC curve
-    fpr, tpr, thresholds = roc_curve(y_val, model.predict_proba(X_val)[:,1])
-    roc_auc = roc_auc_score(y_val, model.predict_proba(X_val)[:,1])
+    # AUROC curve
+    fpr, tpr, thresholds_auroc = roc_curve(y_val, model.predict_proba(X_val)[:,1])
+    auroc_score = roc_auc_score(y_val, model.predict_proba(X_val)[:,1])
     plt.plot(fpr, tpr, marker='.', label='XGBoost')
     plt.xlabel('False Positive Rate')
     plt.ylabel('True Positive Rate')
-    plt.title('ROC Curve: AUC = {:.2f}'.format(roc_auc))
+    plt.title('ROC Curve: AUC = {:.2f}'.format(auroc_score))
     plt.legend()
     plt.show()
+
+    return {'confusion_matrix': cm, 'auprc': { 'precision': precision, 'recall': recall, 'thresholds': thresholds_auprc, 'auprc_score': auprc_score }, 'auroc': { 'fpr': fpr, 'tpr': tpr, 'thresholds': thresholds_auroc, 'auroc_score': auroc_score }}
+
+def get_dataset_names(s_range, reference_classes):
+    # function that returns a list of dataset names of format 'dataset_{reference}_win{s}' for a given range of s (including step size) and a list of reference_classes
+    dataset_names = []
+    for s in s_range:
+        for ref in reference_classes:
+            dataset_names.append(f'dataset_{ref}_win{s}.csv')
+    return dataset_names
+
+def get_dataset_name(s, reference_class):
+    return f'dataset_{reference_class}_win{s}.csv'

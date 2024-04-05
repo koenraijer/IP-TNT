@@ -242,7 +242,7 @@ Repeat steps 2 and 3 for the test set. It's crucial that you calculate new scali
 
 **Thursday, 04 April 2024 20:42, written on Koen’s MacBook Air, at Geldersestraat 1, Sittard:**
 TO DO:
-- Test different window lenghts and different reference classes
+- ~~Test different window lenghts and different reference classes~~
 
 **Friday, 05 April 2024 11:11, written on Koen’s MacBook Air, at Geldersestraat 1, Sittard:**
 Regarding pd.rolling function. I'm looking to get do windowing where the label is at a specific position within the window. Namely, 8s to the left of it, with the remaining seconds in the window to the right of it. This to ensure that no data is in the window that could not possibly contain information about the intrusion. There is no native solution within pandas.rolling (only center=True, but that doesn't cut it), but I found online you can use rolling(window=3).shift(-2) to left-align the label. Following that reasoning:
@@ -271,3 +271,14 @@ df['bvp_kurt'] = temp['bvp'].rolling(window=win).shift(-(win - 8*sr)).kurt().res
 ```
 
 For window size of 8, the shift would be 0 and thus the outcome would be the same. 
+
+---
+
+The purpose of this is to include the window length and the reference class in the Bayesian hyperparameter optimisation process. 
+
+QUESTION: is it "honest" to use TNT vs NT as reference class, as a hyperparameter? This changes the actual task. 
+- Heb nu de window_size en de reference class (alsin: alle no-think, of alle tnt trials) als hyperparameters in de bayesian hyperparameter optimisation procedure. Daarin kiest hij steevast voor enkel no-think als reference class (dat geeft een veel kleinere class imbalance). Het voelt alleen meer als een keuze voor het soort probleem dat je wil oplossen en niet echt als een hyperparameter. Dus ik vraag me af of ik dat niet beter als onderdeel van de probleemdefinitie moet zien?
+
+TO DO:
+- Use Bayesian hyperparameter optimisation to get an AUC/AUCPR for: XGB (✅), SVM, GLM, RF. 
+- Plot them all in the same graph
