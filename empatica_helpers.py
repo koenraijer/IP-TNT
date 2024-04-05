@@ -4,9 +4,10 @@ import re
 import pandas as pd
 import numpy as np
 import neurokit2 as nk
+import seaborn as sns
+import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
-
-from zmq import has
+import helpers as h
 
 def move_folders_to_root(root_path, current_path=None):
     """
@@ -249,3 +250,40 @@ def trim_dataframes(data_frames, ibi_df, starting_times, ending_times, sr, has_i
         
     return trimmed_data_frames, trimmed_ibi_df, latest_start_time, earliest_end_time
 
+def load_empatica(data_folder = 'input/empatica/', useIBI = False, save = False, plotTrimmings=False):
+    dir_list = h.get_dir_list(data_folder)
+    df = pd.DataFrame() 
+    ibi_df = pd.DataFrame()
+    trimmings_array = np.array([]) # Trimmings are the numbers of samples removed from dataframes coming from a single folder due to differing start or end times. 
+    uniqueness_check_df = pd.DataFrame()
+    no_ibi = 0
+    for folder in dir_list:
+        temp, ibi, trimmings, uniqueness_check = load_data_and_combine(f'input/empatica/{folder}', verbose = False, useIBI = useIBI)
+        # Concat to df if not empty
+        if not temp.empty:
+            trimmings_array = np.append(trimmings_array, trimmings)
+            df = pd.concat([df, temp])
+            uniqueness_check_df = pd.concat([uniqueness_check_df, uniqueness_check])
+            if useIBI:
+                ibi_df = pd.concat([ibi_df, ibi])
+        else:
+            if useIBI:
+                print(f"Skipping {folder} due to empty dataframe.")
+        if ibi is None:
+            no_ibi += 1
+    
+    if plotTrimmings:
+        sns.histplot(data=trimmings_array, fill=True)
+        plt.title('Number of samples removed from dataframes due to differing start or end times')
+        plt.show()
+    
+    if save:
+        if useIBI:
+            print(f"Number of folders with no IBI data: {no_ibi} / {len(dir_list)}")
+            df.to_csv('output/empatica_raw.csv', index=False)
+            ibi_df.to_csv('output/empatica_raw_ibi.csv', index=False)
+            print('IBI and Empatica dataframes saved to output folder as: empatica_raw.csv and empatica_raw_ibi.csv.')
+        else:
+            df.to_csv('output/empatica_raw.csv', index=False)
+            print('Empatica dataframe saved to output folder as empatica_raw.csv.')
+    return df, ibi_df

@@ -1,4 +1,5 @@
 import pandas as pd
+import helpers as h
 
 def load_and_process(filepath):
     df = pd.read_csv(filepath, sep="\t")
@@ -26,3 +27,19 @@ def load_and_process(filepath):
     df = df.drop(columns=['blocknum', 'blockcode'])
 
     return df 
+
+def load_inquisit(data_folder = 'input/inquisit', save = False):
+    dir_list = h.get_dir_list(data_folder)
+    # Filter dir_list for the files of the TNT part (with "part1")
+    dir_list = [x for x in dir_list if x.find("part1") != -1]
+    df = pd.DataFrame()
+
+    for file in dir_list:
+        temp = load_and_process(f"{data_folder}/{file}")
+        if not temp.empty:
+            df = pd.concat([df, temp])
+
+    if save:
+        df.to_csv('output/inquisit_combined_raw.csv', index=False)
+    
+    return df

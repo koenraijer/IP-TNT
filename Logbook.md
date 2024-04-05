@@ -221,5 +221,53 @@ A package that does both is [shap-hypetune](https://github.com/cerlymarco/shap-h
 **Tuesday, 02 April 2024 10:11, written on Koen’s MacBook Air, at Geldersestraat 1, Sittard:**
 TO DO: 
 - remove common-sense wrong intrusions. I.e., intrusions that are less than or equal to 3s apart cannot be (due to trial length). 
-- Do within-person normalisation of raw features
-- See what happens when intrusions are defined more strictly (e.g. only "often" classifies as an intrusion). 
+- ~~Do within-person normalisation of raw features~~
+- ~~See what happens when intrusions are defined more strictly (e.g. only "often" classifies as an intrusion).~~ <- not an option, too few intrusions will remain. 
+
+**Thursday, 04 April 2024 08:54, written on Koen’s MacBook Air, at Geldersestraat 3, Sittard:**
+On per-participant normalisation:
+Data leakage is when information from the test set is in the training data. E.g., when normalising based on test set data then splitting. But in the code you provide, a new scaler is instantiated for each participant, and since the data was split on a per-participant basis, no leakage can occur?
+
+When dealing with grouped or clustered data, you should ensure that the normalization process is conducted within each group or cluster separately. This is to ensure that information from one group does not leak into another, which could happen if normalization was performed on the entire dataset at once.
+
+Here's a step-by-step approach:
+
+Split your data into training and test sets, ensuring that all data from a single group is either in the training set or in the test set. This is important to prevent data leakage between the training and test sets.
+
+For each group in the training set, calculate the scaling factors (e.g., mean and standard deviation for standardization, min and max for normalization) based on the data within that group only.
+
+Apply the scaling factors to the data within each group. This means that each group will be normalized independently of the others.
+
+Repeat steps 2 and 3 for the test set. It's crucial that you calculate new scaling factors for the test set, rather than using the ones from the training set. This is because the test set should be treated as unseen data that the model has no prior knowledge of.
+
+**Thursday, 04 April 2024 20:42, written on Koen’s MacBook Air, at Geldersestraat 1, Sittard:**
+TO DO:
+- Test different window lenghts and different reference classes
+
+**Friday, 05 April 2024 11:11, written on Koen’s MacBook Air, at Geldersestraat 1, Sittard:**
+Regarding pd.rolling function. I'm looking to get do windowing where the label is at a specific position within the window. Namely, 8s to the left of it, with the remaining seconds in the window to the right of it. This to ensure that no data is in the window that could not possibly contain information about the intrusion. There is no native solution within pandas.rolling (only center=True, but that doesn't cut it), but I found online you can use rolling(window=3).shift(-2) to left-align the label. Following that reasoning:
+
+If I have a window length of 12s, where I want 8s to be to the left of the label, and 4 seconds to the right of the label, I can achieve that using: rolling(window=12*sr).shift(-(12-8)).
+
+This is part of my original feature_engineering function:
+```
+def get_features(df = None, filename='output/ei_prep.csv', s=8, sr=64, save=False, reference_class='tnt'):
+    print('Engineering features...')
+    # Meant for 'output/combined_feature_engineered_tnt_only.csv'
+    # Data loading
+    if df is None:
+        df = pd.read_csv(filename)
+    
+    df['datetime'] = pd.to_datetime(df['datetime'])
+
+    # Calculate the window size in samples
+    win = sr*s
+    df['bvp_kurt'] = temp['bvp'].rolling(window=win).kurt().reset_index(0, drop=True)
+```
+
+To adapt it, I can use:
+```
+df['bvp_kurt'] = temp['bvp'].rolling(window=win).shift(-(win - 8*sr)).kurt().reset_index(0, drop=True)
+```
+
+For window size of 8, the shift would be 0 and thus the outcome would be the same. 
