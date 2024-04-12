@@ -245,15 +245,18 @@ def prepare_datasets(df = None, filename = 'output/dataset_tnt_win8.csv', test_s
 
     # Create train/test split
     gss = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=42)
-    train_idx, test_idx = next(gss.split(X, y, groups=participants))
-    X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
-    y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
+    train_full_idx, test_idx = next(gss.split(X, y, groups=participants))
+    X_train, X_test = X.iloc[train_full_idx], X.iloc[test_idx]
+    y_train, y_test = y.iloc[train_full_idx], y.iloc[test_idx]
+
+    # Save X_train and y_train as X_train_full and y_train_full
+    X_train_full, y_train_full = X_train, y_train
 
     # Create train/validation split
     gss = GroupShuffleSplit(n_splits=1, test_size=val_size/(1-test_size), random_state=42)
-    train_wval_idx, val_idx = next(gss.split(X_train, y_train, groups=participants.iloc[train_idx]))
-    X_train, X_val = X_train.iloc[train_wval_idx], X_train.iloc[val_idx]
-    y_train, y_val = y_train.iloc[train_wval_idx], y_train.iloc[val_idx]
+    train_idx, val_idx = next(gss.split(X_train, y_train, groups=participants.iloc[train_full_idx]))
+    X_train, X_val = X_train.iloc[train_idx], X_train.iloc[val_idx]
+    y_train, y_val = y_train.iloc[train_idx], y_train.iloc[val_idx]
 
     # Impute missing values
     knn_imputer = KNNImputer(n_neighbors=5)
@@ -262,22 +265,22 @@ def prepare_datasets(df = None, filename = 'output/dataset_tnt_win8.csv', test_s
     X_val = pd.DataFrame(knn_imputer.transform(X_val), columns=X_val.columns)
     X_test = pd.DataFrame(knn_imputer.transform(X_test), columns=X_test.columns)
 
-    # Recombine the training and validation sets for cross-validation
-    X_train_val = np.concatenate((X_train, X_val), axis=0)
-    y_train_val = np.concatenate((y_train, y_val), axis=0)
-
     feature_names = X.columns.tolist()
+
+    # Get the participants in the current training and validation sets
+    train_participants = participants.iloc[train_full_idx].iloc[train_idx]
+    val_participants = participants.iloc[train_full_idx].iloc[val_idx]
 
     # Print lengths of the datasets
     if verbose:
-        print(f"Training set: {len(X_train)} rows of features, {len(y_train)} labels")
-        print(f"Validation set: {len(X_val)} rows of features, {len(y_val)} labels")
-        print(f"Training + Validation set: {len(X_train_val)} rows of features, {len(y_train_val)} labels")
-        print(f"Test set: {len(X_test)} rows of features, {len(y_test)} labels")
+        print(f"Training set: {len(X_train)} rows of features, {len(y_train)} labels, {len(np.unique(train_participants))} participants")
+        print(f"Validation set: {len(X_val)} rows of features, {len(y_val)} labels, {len(np.unique(val_participants))} participants")
+        print(f"Training + Validation set: {len(X_train_full)} rows of features, {len(y_train_full)} labels, {len(np.unique(participants.iloc[train_full_idx]))} participants")
+        print(f"Test set: {len(X_test)} rows of features, {len(y_test)} labels, {len(np.unique(participants.iloc[test_idx]))} participants")
 
-    return X_train, y_train, X_val, y_val, X_test, y_test, X_train_val, y_train_val, train_idx, train_wval_idx, val_idx, test_idx, df, feature_names, participants
+    return X_train, y_train, X_val, y_val, X_test, y_test, X_train_full, y_train_full, train_full_idx, train_idx, val_idx, test_idx, df, feature_names, participants
 
-def create_folds(X_train, y_train, groups, n_folds=10):
+def create_folds(X_train, y_train, groups, n_folds=10, verbose=False):
     """
     Create folds for cross-validation using GroupKFold.
 
@@ -300,9 +303,10 @@ def create_folds(X_train, y_train, groups, n_folds=10):
         folds.append((train_index.tolist(), test_index.tolist()))
 
     # Print length of each sublist
-    print("Folds created:")
-    for fold in folds:
-        print(f"Train: {len(fold[0])}, Eval: {len(fold[1])}")
+    if verbose:
+        print("Folds created:")
+        for fold in folds:
+            print(f"Train: {len(fold[0])}, Eval: {len(fold[1])}")
 
     return folds
 
@@ -315,37 +319,98 @@ def xgb_aucpr(preds, dtrain):
     labels = dtrain.get_label()
     return 'aucpr', -average_precision_score(labels, preds)
 
-def plot_metrics(y_val, y_pred, model, X_val):
+def plot_metrics(y_val, y_pred, model, X_val, plot_confusion_matrix=False, plot_auprc=False, plot_auroc=False):
     # Confusion matrix
     cm = confusion_matrix(y_val, y_pred)
-    sns.heatmap(cm, annot=True, fmt='d')
-    plt.xticks([0.5, 1.5], ['0', '1'])
-    plt.xlabel('Predicted')
-    plt.ylabel('True')
-    plt.title('Confusion Matrix')
-    plt.show()
+    if plot_confusion_matrix:
+        sns.heatmap(cm, annot=True, fmt='d')
+        plt.xticks([0.5, 1.5], ['0', '1'])
+        plt.xlabel('Predicted')
+        plt.ylabel('True')
+        plt.title('Confusion Matrix')
+        plt.show()
 
     # AUPRC curve
     precision, recall, thresholds_auprc = precision_recall_curve(y_val, model.predict_proba(X_val)[:,1])
     auprc_score = auc(recall, precision)
-    plt.plot(recall, precision, marker='.', label='XGBoost')
-    plt.xlabel('Recall')
-    plt.ylabel('Precision')
-    plt.title('Precision-Recall Curve: AUC = {:.2f}'.format(auprc_score))
-    plt.legend()
-    plt.show()
+    if plot_auprc:
+        plt.plot(recall, precision, marker='.', label='XGBoost')
+        plt.xlabel('Recall')
+        plt.ylabel('Precision')
+        plt.title('Precision-Recall Curve: AUC = {:.2f}'.format(auprc_score))
+        plt.legend()
+        plt.show()
 
     # AUROC curve
     fpr, tpr, thresholds_auroc = roc_curve(y_val, model.predict_proba(X_val)[:,1])
     auroc_score = roc_auc_score(y_val, model.predict_proba(X_val)[:,1])
-    plt.plot(fpr, tpr, marker='.', label='XGBoost')
-    plt.xlabel('False Positive Rate')
-    plt.ylabel('True Positive Rate')
-    plt.title('ROC Curve: AUC = {:.2f}'.format(auroc_score))
+    if plot_auroc:
+        plt.plot(fpr, tpr, marker='.', label='XGBoost')
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title('ROC Curve: AUC = {:.2f}'.format(auroc_score))
+        plt.legend()
+        plt.show()
+
+    return {'confusion_matrix': cm, 'auprc': { 'precision': precision, 'recall': recall, 'thresholds': thresholds_auprc, 'auprc_score': auprc_score }, 'auroc': { 'fpr': fpr, 'tpr': tpr, 'thresholds': thresholds_auroc, 'auroc_score': auroc_score }}
+
+def plot_confusion_matrix(cm, title):
+    fig, ax = plt.subplots()
+    im = ax.imshow(cm, cmap='Blues')
+
+    # We want to show all ticks...
+    ax.set_xticks(np.arange(cm.shape[1]))
+    ax.set_yticks(np.arange(cm.shape[0]))
+    # ... and label them with the respective list entries
+    ax.set_xticklabels(['Predicted 0', 'Predicted 1'])
+    ax.set_yticklabels(['Actual 0', 'Actual 1'])
+
+    # Rotate the tick labels and set their alignment.
+    plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+
+    # Define the threshold for color contrast
+    threshold = cm.max() / 2.
+
+    # Loop over data dimensions and create text annotations.
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            text_color = "white" if cm[i, j] > threshold else "black"
+            text = ax.text(j, i, cm[i, j], ha="center", va="center", color=text_color)
+
+    ax.set_title(title)
+    ax.grid(False)
+    fig.tight_layout()
+    plt.show()
+
+def plot_all_metrics(all_model_metrics):
+    # Plot AUPRC
+    for model_name, metrics in all_model_metrics.items():
+        precision = metrics['auprc']['precision']
+        recall = metrics['auprc']['recall']
+        auprc_score = metrics['auprc']['auprc_score']
+        plt.plot(recall, precision, marker='.', label=f'{model_name} AUPRC = {auprc_score:.2f}')
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.title('Precision-Recall Curve')
     plt.legend()
     plt.show()
 
-    return {'confusion_matrix': cm, 'auprc': { 'precision': precision, 'recall': recall, 'thresholds': thresholds_auprc, 'auprc_score': auprc_score }, 'auroc': { 'fpr': fpr, 'tpr': tpr, 'thresholds': thresholds_auroc, 'auroc_score': auroc_score }}
+    # Plot AUROC
+    for model_name, metrics in all_model_metrics.items():
+        fpr = metrics['auroc']['fpr']
+        tpr = metrics['auroc']['tpr']
+        auroc_score = metrics['auroc']['auroc_score']
+        plt.plot(fpr, tpr, marker='.', label=f'{model_name} AUROC = {auroc_score:.2f}')
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('ROC Curve')
+    plt.legend()
+    plt.show()
+
+    # Plot confusion matrices
+    for model_name, metrics in all_model_metrics.items():
+        cm = metrics['confusion_matrix']
+        plot_confusion_matrix(cm, f'{model_name} Confusion Matrix')
 
 def get_dataset_names(s_range, reference_classes):
     # function that returns a list of dataset names of format 'dataset_{reference}_win{s}' for a given range of s (including step size) and a list of reference_classes
