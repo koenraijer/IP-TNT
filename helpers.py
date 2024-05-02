@@ -1,16 +1,19 @@
 import os 
 import pandas as pd
 import numpy as np
+import pickle
 from datetime import timedelta
 from sklearn.metrics import f1_score, average_precision_score, roc_auc_score
 from sklearn.model_selection import GroupShuffleSplit
+from sklearn.utils import shuffle
 from sklearn.impute import KNNImputer
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.model_selection import GroupKFold
 from imblearn.over_sampling import SMOTE
 from imblearn.under_sampling import RandomUnderSampler
 from imblearn.pipeline import Pipeline
 from sklearn.metrics import confusion_matrix, precision_recall_curve, roc_curve, roc_auc_score, auc
+from scipy.stats import skew, kurtosis
 import matplotlib.pyplot as plt
 import seaborn as sns
 import neurokit2 as nk
@@ -24,7 +27,7 @@ def get_dir_list(path):
     """
     return [x for x in os.listdir(path) if x != ".DS_Store"]
 
-def combine_empatica_and_inquisit(empatica_df, inquisit_df, save=False):
+def combine_empatica_and_inquisit(empatica_df, inquisit_df, save=False, sr=64):
     # Add unix_time to df (inquisit_df['time'][0] = 2023-04-18 16:59:11.535)
     inquisit_df['unix_time'] = pd.to_datetime(inquisit_df['time']).astype(int) / 10**9
 
@@ -41,10 +44,10 @@ def combine_empatica_and_inquisit(empatica_df, inquisit_df, save=False):
     merged_df['delta_t'] = (merged_df['datetime_x'] - merged_df['datetime_y']).abs()
 
     # Add a new 'response' column to merged_df containing the response value only if the time difference is less than or equal to 0.25 seconds
-    merged_df['new_response'] = merged_df.apply(lambda row: row['response'] if row['delta_t'] <= pd.Timedelta(seconds=1/64) else 0, axis=1)
+    merged_df['new_response'] = merged_df.apply(lambda row: row['response'] if row['delta_t'] <= pd.Timedelta(seconds=1/sr) else 0, axis=1)
 
     # Add a new 'trialcode' column to merged_df containing the trialcode value only if the time difference is less than or equal to 0.25 seconds, otherwise set it to NaN
-    merged_df['trialcode'] = merged_df.apply(lambda row: row['trialcode'] if row['delta_t'] <= pd.Timedelta(seconds=1/64) else None, axis=1)
+    merged_df['trialcode'] = merged_df.apply(lambda row: row['trialcode'] if row['delta_t'] <= pd.Timedelta(seconds=1/sr) else None, axis=1)
 
     merged_df.drop(columns=['datetime_y', 'response', 'delta_t'], inplace=True)
     merged_df.rename(columns={"datetime_x": "datetime"}, inplace=True)
@@ -123,7 +126,7 @@ def closest_timestamp(empatica_ts, inquisit_timestamps):
     """
     return min(inquisit_timestamps, key=lambda x: abs(x - empatica_ts))
 
-def preprocess_data(df = None, filename='output/empatica_inquisit_merged.csv', save=False, sr=64):
+def clean_scale_filter(df = None, filename='output/empatica_inquisit_merged.csv', save=False, sr=64, normalise=False, window_length=8):
     print("Preprocessing data...")
     # Data loading
     if df is None:
@@ -132,8 +135,8 @@ def preprocess_data(df = None, filename='output/empatica_inquisit_merged.csv', s
     df['datetime'] = pd.to_datetime(df['datetime'])
 
     # Filtering 
-    df['eda'] = nk.eda_clean(df['eda'], sampling_rate=64, method='biosppy')
-    df['bvp'] = nk.ppg_clean(df['bvp'], sampling_rate=64, heart_rate=None, method='elgendi')
+    df['eda'] = nk.eda_clean(df['eda'], sampling_rate=sr, method='biosppy')
+    df['bvp'] = nk.ppg_clean(df['bvp'], sampling_rate=sr, heart_rate=None, method='elgendi')
 
     # Calculate body acceleration
     df['body_acc'] = np.sqrt(df['acc_x']**2 + df['acc_y']**2 + df['acc_z']**2)
@@ -145,7 +148,10 @@ def preprocess_data(df = None, filename='output/empatica_inquisit_merged.csv', s
     participants = df['participant']
 
     # Apply StandardScaler to each participant group and avoid resetting the index
-    scaled_df = df.groupby(participants)[columns_to_normalize].apply(lambda x: pd.DataFrame(StandardScaler().fit_transform(x), columns=x.columns) if len(x) > 1 else x)
+    if normalise:
+        scaled_df = df.groupby(participants)[columns_to_normalize].apply(lambda x: pd.DataFrame(MinMaxScaler().fit_transform(x), columns=x.columns) if len(x) > 1 else x)
+    else:
+        scaled_df = df.groupby(participants)[columns_to_normalize].apply(lambda x: pd.DataFrame(StandardScaler().fit_transform(x), columns=x.columns) if len(x) > 1 else x)
 
     # Reset the inner level of the index
     scaled_df.reset_index(drop=True, inplace=True)
@@ -155,12 +161,12 @@ def preprocess_data(df = None, filename='output/empatica_inquisit_merged.csv', s
     print("Normalised columns: ", columns_to_normalize)
 
     # Create a column 'session_id' that identifies each session
-    df['session_id'] = (df['datetime'].diff() > pd.Timedelta(seconds=1/64)).cumsum()
+    df['session_id'] = (df['datetime'].diff() > pd.Timedelta(seconds=1/sr)).cumsum()
     # Create a column 'session_duration' that indicates the duration of each session
     df['session_duration'] = df.groupby('session_id')['datetime'].transform(lambda x: x.max() - x.min())
-    # Drop all sessions that are shorter than 8 seconds
+    # Drop all sessions that are shorter than window_length seconds
     print(f"Number of sessions before filtering: {len(df['session_id'].unique())}")
-    df = df[df['session_duration'].dt.total_seconds() > 8]
+    df = df[df['session_duration'].dt.total_seconds() > window_length]
     print(f"Number of sessions after filtering: {len(df['session_id'].unique())}")
 
     df.drop(columns=['session_duration'])
@@ -178,6 +184,11 @@ def preprocess_data(df = None, filename='output/empatica_inquisit_merged.csv', s
     
     print("Preprocessing complete.")
     return df
+
+"""
+OLD: useful without the VAE in between the preprocessing and the feature engineering
+# df = h.get_features(save=True, s=s, reference_class=ref)
+# X_train, y_train, X_val, y_val, X_test, y_test, X_train_val, y_train_val, train_idx, train_wval_idx, val_idx, test_idx, df, feature_names, participants = h.prepare_datasets(df=df, test_size=0.1, val_size=0.1) 
 
 def get_features(df = None, filename='output/ei_prep.csv', s=8, sr=64, save=False, reference_class='tnt'):
     print(f'Engineering features... (window size: {s}s, reference class: {reference_class})')
@@ -279,6 +290,127 @@ def prepare_datasets(df = None, filename = 'output/dataset_tnt_win8.csv', test_s
         print(f"Test set: {len(X_test)} rows of features, {len(y_test)} labels, {len(np.unique(participants.iloc[test_idx]))} participants")
 
     return X_train, y_train, X_val, y_val, X_test, y_test, X_train_full, y_train_full, train_full_idx, train_idx, val_idx, test_idx, df, feature_names, participants
+"""
+
+def prepare_for_vae(sr=32, wl=24, filepath="output/ei_prep.csv", save=False, data=None):
+    if data:
+        df = data
+    else: 
+        df = pd.read_csv(filepath)
+
+    window_length = wl * sr
+    window_excess = window_length - (8*sr) if window_length > 8*sr else 0 
+    window_length = 8*sr if window_length > 8*sr else window_length
+
+    df = df[['participant', 'temp', 'bvp', 'hr', 'body_acc', 'eda_tonic', 'eda_phasic', 'intrusion_nothink']]
+
+    samples = []
+    labels = []
+    participants = []
+
+    for i in range(len(df)):
+        if df.iloc[i]['intrusion_nothink'] in [0, 1]:
+            if i - window_length >= 0 and i + window_excess < len(df):
+                if len(df.iloc[i-window_length:i+window_excess]['participant'].unique()) == 1:
+                    samples.append(df.iloc[i-window_length:i+window_excess][['temp', 'bvp', 'hr', 'body_acc', 'eda_tonic', 'eda_phasic']].values)
+                    labels.append(df.iloc[i]['intrusion_nothink'])
+                    participants.append(df.iloc[i]['participant'])
+
+    X = np.array(samples)
+    y = np.array(labels)
+    p = np.array(participants)
+
+    if save:
+        with open(f'output/dl_X_wl{wl}_sr{sr}.pkl', 'wb') as f:
+            pickle.dump(X, f)
+        with open(f'output/dl_y_wl{wl}_sr{sr}.pkl', 'wb') as f:
+            pickle.dump(y, f)
+        with open(f'output/dl_p_wl{wl}_sr{sr}.pkl', 'wb') as f:
+            pickle.dump(p, f)
+    
+    return X, y, p
+
+def prepare_train_val_test_sets(X=None, y=None, p=None, filenames=None, test_size=0.15, val_size=0.05, random_state=42):
+    if filenames:
+        with open(filenames[0], 'rb') as f:
+            X = pickle.load(f)
+        with open(filenames[1], 'rb') as f:
+            y = pickle.load(f)
+        with open(filenames[2], 'rb') as f:
+            p = pickle.load(f)
+
+    # Initialize GroupShuffleSplit
+    gss = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=random_state)
+
+    # Get the indices of the training and test sets
+    trainval_idx, test_idx = next(gss.split(X, y, groups=p))
+
+    # Create the training and test sets
+    X_train, X_test = X[trainval_idx], X[test_idx]
+    y_train, y_test = y[trainval_idx], y[test_idx]
+
+    # Create the training and test groups
+    p_train, p_test = p[trainval_idx], p[test_idx]
+
+    # Shuffle the training set
+    X_train, y_train, p_train = shuffle(X_train, y_train, p_train, random_state=random_state)
+
+    # Initialize another GroupShuffleSplit
+    gss_val = GroupShuffleSplit(n_splits=1, test_size=val_size, random_state=random_state)
+
+    # Get the indices of the training and validation sets
+    train_idx, val_idx = next(gss_val.split(X_train, y_train, groups=p_train))
+
+    # Create the training and validation sets
+    X_train, X_val = X_train[train_idx], X_train[val_idx]
+    y_train, y_val = y_train[train_idx], y_train[val_idx]
+
+    # Create the training and validation groups
+    p_train, p_val = p_train[train_idx], p_train[val_idx]
+
+    # Shuffle the training set
+    X_train, y_train, p_train = shuffle(X_train, y_train, p_train, random_state=random_state)
+
+    print("Train size: ", (X_train.shape[0] / X.shape[0]) * 100)
+    print("Val size: ", (X_val.shape[0] / X.shape[0]) * 100)
+    print("Test size: ", (X_test.shape[0] / X.shape[0]) * 100)
+
+    print("Size: :", X_train.shape)
+
+    return X_train, X_val, X_test, y_train, y_val, y_test, p_train, p_val, p_test
+
+def prepare_for_ml(data, feature_names=['temp', 'bvp', 'hr', 'body_acc', 'eda_tonic', 'eda_phasic']):
+    # Define the operations
+    operations = [np.mean, np.std, np.min, np.max, skew, kurtosis]
+    operation_names = ['mean', 'std', 'min', 'max', 'skew', 'kurt']
+
+    # Initialize an empty list to store the results
+    results = []
+
+    # Initialize an empty list to store the column names
+    column_names = []
+
+    # Loop over the last dimension of the data (the features)
+    for i in range(data.shape[-1]):
+        # Extract the feature
+        feature = data[:, :, i]
+
+        # Calculate the aggregates for this feature
+        aggregates = [op(feature, axis=1) for op in operations]
+
+        # Add the aggregates to the results
+        results.extend(aggregates)
+
+        # Add the column names for this feature
+        column_names.extend([f'{feature_names[i]}_{op_name}' for op_name in operation_names])
+
+    # Convert the results to a 2D array
+    results = np.stack(results, axis=-1)
+
+    # Convert the results to a DataFrame
+    df = pd.DataFrame(results, columns=column_names)
+
+    return df
 
 def create_folds(X_train, y_train, groups, n_folds=10, verbose=False):
     """

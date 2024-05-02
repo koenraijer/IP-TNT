@@ -136,7 +136,7 @@ def load_csv_file(file_path):
     signal = df.iloc[2:, :].values
     return starting_time, sampling_rate, signal
 
-def handle_ibi_file(file_path):
+def handle_ibi_file(file_path, desired_sampling_rate):
     try:
         df = pd.read_csv(file_path, header=None)
     except pd.errors.EmptyDataError:
@@ -158,7 +158,18 @@ def handle_ibi_file(file_path):
     ibi_df['datetime'] = [starting_datetime + timedelta(seconds=delta_t) for delta_t in ibi_df['delta_t']]
     ibi_df['unix_time'] = starting_time + ibi_df['delta_t']
 
-    ibi_df.drop(columns='delta_t', inplace=True)
+    # Convert IBI data into a continuous signal
+    ibi_signal = pd.Series(index=ibi_df['unix_time'], data=ibi_df['ibi']).sort_index()
+    ibi_signal.index = pd.to_datetime(ibi_signal.index, unit='s')
+
+    # Resample the IBI signal to the desired sampling rate
+    ibi_signal = nk.signal_resample(ibi_signal, sampling_rate=1, desired_sampling_rate=desired_sampling_rate, method="FFT")
+
+    ibi_df = pd.DataFrame(ibi_signal, columns=['ibi'])
+    ibi_df['datetime'] = ibi_df.index
+    ibi_df['unix_time'] = ibi_df.index.astype(int) / 1e9  # Convert datetime index to unix time
+
+    ibi_df.drop(columns='delta_t', inplace=True, errors='ignore')
     file = file_path.split('/')[-2]
     ibi_df['source'] = file
 
@@ -197,7 +208,7 @@ def load_data_and_combine(folder, desired_sampling_rate=64, verbose=False, useIB
         ending_times.append(ending_time)
         data_frames.append(data)
     
-    ibi_df, starting_time, ending_time = handle_ibi_file(os.path.join(folder, 'IBI.csv'))
+    ibi_df, starting_time, ending_time = handle_ibi_file(os.path.join(folder, 'IBI.csv'), desired_sampling_rate=desired_sampling_rate)
     if useIBI is True and not ibi_df.empty:
         starting_times.append(starting_time)
         ending_times.append(ending_time)
@@ -250,7 +261,7 @@ def trim_dataframes(data_frames, ibi_df, starting_times, ending_times, sr, has_i
         
     return trimmed_data_frames, trimmed_ibi_df, latest_start_time, earliest_end_time
 
-def load_empatica(data_folder = 'input/empatica/', useIBI = False, save = False, plotTrimmings=False):
+def load_empatica(data_folder = 'input/empatica/', useIBI = False, save = False, plotTrimmings=False, desired_sampling_rate=64):
     dir_list = h.get_dir_list(data_folder)
     df = pd.DataFrame() 
     ibi_df = pd.DataFrame()
@@ -258,7 +269,7 @@ def load_empatica(data_folder = 'input/empatica/', useIBI = False, save = False,
     uniqueness_check_df = pd.DataFrame()
     no_ibi = 0
     for folder in dir_list:
-        temp, ibi, trimmings, uniqueness_check = load_data_and_combine(f'input/empatica/{folder}', verbose = False, useIBI = useIBI)
+        temp, ibi, trimmings, uniqueness_check = load_data_and_combine(f'input/empatica/{folder}', verbose = False, useIBI = useIBI, desired_sampling_rate=desired_sampling_rate)
         # Concat to df if not empty
         if not temp.empty:
             trimmings_array = np.append(trimmings_array, trimmings)
