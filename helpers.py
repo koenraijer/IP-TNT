@@ -17,6 +17,9 @@ from scipy.stats import skew, kurtosis
 import matplotlib.pyplot as plt
 import seaborn as sns
 import neurokit2 as nk
+from sklearn.experimental import enable_iterative_imputer
+from sklearn.impute import IterativeImputer
+from scipy.stats import median_abs_deviation
 
 def get_dir_list(path):
     """
@@ -126,7 +129,7 @@ def closest_timestamp(empatica_ts, inquisit_timestamps):
     """
     return min(inquisit_timestamps, key=lambda x: abs(x - empatica_ts))
 
-def clean_scale_filter(df = None, filename='output/empatica_inquisit_merged.csv', save=False, sr=64, normalise=False, window_length=8):
+def clean_and_filter(df = None, filename='output/empatica_inquisit_merged.csv', save=False, sr=64, normalise=False, window_length=8):
     print("Preprocessing data...")
     # Data loading
     if df is None:
@@ -148,17 +151,27 @@ def clean_scale_filter(df = None, filename='output/empatica_inquisit_merged.csv'
     participants = df['participant']
 
     # Apply StandardScaler to each participant group and avoid resetting the index
-    if normalise:
+    if normalise is True:
         scaled_df = df.groupby(participants)[columns_to_normalize].apply(lambda x: pd.DataFrame(MinMaxScaler().fit_transform(x), columns=x.columns) if len(x) > 1 else x)
-    else:
+        # Reset the inner level of the index
+        scaled_df.reset_index(drop=True, inplace=True)
+
+        # Merge the scaled data back into the original dataframe
+        df[columns_to_normalize] = scaled_df
+        print("Normalised columns: ", columns_to_normalize)
+        norm = 'minmax' 
+    elif normalise is False:
         scaled_df = df.groupby(participants)[columns_to_normalize].apply(lambda x: pd.DataFrame(StandardScaler().fit_transform(x), columns=x.columns) if len(x) > 1 else x)
+        # Reset the inner level of the index
+        scaled_df.reset_index(drop=True, inplace=True)
 
-    # Reset the inner level of the index
-    scaled_df.reset_index(drop=True, inplace=True)
-
-    # Merge the scaled data back into the original dataframe
-    df[columns_to_normalize] = scaled_df
-    print("Normalised columns: ", columns_to_normalize)
+        # Merge the scaled data back into the original dataframe
+        df[columns_to_normalize] = scaled_df
+        print("Normalised columns: ", columns_to_normalize)
+        norm = 'standard'
+    else:
+        norm = 'original'
+        pass
 
     # Create a column 'session_id' that identifies each session
     df['session_id'] = (df['datetime'].diff() > pd.Timedelta(seconds=1/sr)).cumsum()
@@ -169,18 +182,23 @@ def clean_scale_filter(df = None, filename='output/empatica_inquisit_merged.csv'
     df = df[df['session_duration'].dt.total_seconds() > window_length]
     print(f"Number of sessions after filtering: {len(df['session_id'].unique())}")
 
-    df.drop(columns=['session_duration'])
+    df = df.drop(columns=['session_duration'])
 
     # EDA
     signals, info = nk.eda_process(df['eda'], sampling_rate=sr)
     df['eda'] = signals['EDA_Clean'].values
-    df.drop(columns=['eda'])
+    # df = df.drop(columns=['eda'])
 
-    df['eda_tonic'] = signals['EDA_Tonic'].values
-    df['eda_phasic'] = signals['EDA_Phasic'].values
+    # df['eda_tonic'] = signals['EDA_Tonic'].values
+    # df['eda_phasic'] = signals['EDA_Phasic'].values
+
+    # Print min and max values of each column (df.describe() does not work with the new columns)
+    print("Min and max values of each column:")
+    print(df[["body_acc", "temp", "eda", "bvp", "hr"]].describe().loc[['min', 'max']])
+    # print(df[["body_acc", "temp", "eda_tonic", "eda_phasic", "bvp", "hr"]].describe().loc[['min', 'max']])
 
     if save:
-        df.to_csv('output/ei_prep.csv', index=False)
+        df.to_csv(f"output/ei_prep_{norm}.csv", index=False)
     
     print("Preprocessing complete.")
     return df
@@ -292,8 +310,8 @@ def prepare_datasets(df = None, filename = 'output/dataset_tnt_win8.csv', test_s
     return X_train, y_train, X_val, y_val, X_test, y_test, X_train_full, y_train_full, train_full_idx, train_idx, val_idx, test_idx, df, feature_names, participants
 """
 
-def prepare_for_vae(sr=32, wl=24, filepath="output/ei_prep.csv", save=False, data=None):
-    if data:
+def prepare_for_vae(sr=32, wl=24, filepath="output/ei_prep.csv", features=['participant', 'temp', 'bvp', 'hr', 'body_acc', 'eda', 'intrusion_nothink'], save=False, data=None, normalise=True, verbose=False):
+    if data is not None and not data.empty:
         df = data
     else: 
         df = pd.read_csv(filepath)
@@ -302,7 +320,8 @@ def prepare_for_vae(sr=32, wl=24, filepath="output/ei_prep.csv", save=False, dat
     window_excess = window_length - (8*sr) if window_length > 8*sr else 0 
     window_length = 8*sr if window_length > 8*sr else window_length
 
-    df = df[['participant', 'temp', 'bvp', 'hr', 'body_acc', 'eda_tonic', 'eda_phasic', 'intrusion_nothink']]
+    # df = df[['participant', 'temp', 'bvp', 'hr', 'body_acc', 'eda_tonic', 'eda_phasic', 'intrusion_nothink']]
+    df = df[features]
 
     samples = []
     labels = []
@@ -312,7 +331,7 @@ def prepare_for_vae(sr=32, wl=24, filepath="output/ei_prep.csv", save=False, dat
         if df.iloc[i]['intrusion_nothink'] in [0, 1]:
             if i - window_length >= 0 and i + window_excess < len(df):
                 if len(df.iloc[i-window_length:i+window_excess]['participant'].unique()) == 1:
-                    samples.append(df.iloc[i-window_length:i+window_excess][['temp', 'bvp', 'hr', 'body_acc', 'eda_tonic', 'eda_phasic']].values)
+                    samples.append(df.iloc[i-window_length:i+window_excess][features[1:-1]].values)
                     labels.append(df.iloc[i]['intrusion_nothink'])
                     participants.append(df.iloc[i]['participant'])
 
@@ -320,12 +339,119 @@ def prepare_for_vae(sr=32, wl=24, filepath="output/ei_prep.csv", save=False, dat
     y = np.array(labels)
     p = np.array(participants)
 
+    if verbose:
+        print(f"X shape: {X.shape}")
+        print(f"y shape: {y.shape}")
+        print(f"p shape: {p.shape}")
+    
+    # Apply minmax scaling on a per-participant, per-feature basis
+    if normalise is True:
+        # Get unique participants
+        unique_participants = np.unique(p)
+
+        # Initialize an empty list to hold the scaled data
+        scaled_data = []
+
+        # Loop over each unique participant
+        for participant in unique_participants:
+            # Get the indices of the current participant's data
+            participant_indices = np.where(p == participant)[0]
+
+            # Get the current participant's data
+            participant_data = X[participant_indices]
+
+            # Apply the scaler to each feature of the participant's data
+            for j in range(participant_data.shape[2]):
+                # Get the original shape
+                original_shape = participant_data[:, :, j].shape
+
+                # Apply the scaler and reshape back to the original shape
+                scaled_feature = MinMaxScaler().fit_transform(participant_data[:, :, j].reshape(-1, 1)).reshape(original_shape)
+
+                # Assign the scaled feature back to the participant data
+                participant_data[:, :, j] = scaled_feature
+
+            # Append the scaled data to the list
+            scaled_data.append(participant_data)
+
+        # Concatenate the list of scaled data arrays along the first axis
+        X = np.concatenate(scaled_data, axis=0)
+    if normalise is False:
+        # Get unique participants
+        unique_participants = np.unique(p)
+
+        # Initialize an empty list to hold the scaled data
+        scaled_data = []
+
+        # Loop over each unique participant
+        for participant in unique_participants:
+            # Get the indices of the current participant's data
+            participant_indices = np.where(p == participant)[0]
+
+            # Get the current participant's data
+            participant_data = X[participant_indices]
+
+            # Apply the scaler to each feature of the participant's data
+            for j in range(participant_data.shape[2]):
+                # Get the original shape
+                original_shape = participant_data[:, :, j].shape
+
+                # Apply the scaler and reshape back to the original shape
+                scaled_feature = StandardScaler().fit_transform(participant_data[:, :, j].reshape(-1, 1)).reshape(original_shape)
+
+                # Assign the scaled feature back to the participant data
+                participant_data[:, :, j] = scaled_feature
+
+            # Append the scaled data to the list
+            scaled_data.append(participant_data)
+
+        # Concatenate the list of scaled data arrays along the first axis
+        X = np.concatenate(scaled_data, axis=0)
+    else:
+        pass
+    
+    # Obtain eda_tonic and eda_phasic using nk.eda_process. Pay attention to data shape (samples, timesteps, features), where EDA is the last feature (index 4)
+    # Reshape X to combine the samples and timesteps dimensions
+    X_reshaped = X.reshape(-1, X.shape[-1])
+
+    if verbose:
+        print(f"X shape: {X.shape}")
+        print(f"X_reshaped shape: {X_reshaped.shape}")
+
+    # Apply eda_process to the reshaped data
+    signals, info = nk.eda_process(X_reshaped[:, 4], sampling_rate=sr)
+    X_eda_tonic = signals['EDA_Tonic'].values
+    X_eda_phasic = signals['EDA_Phasic'].values
+
+    if verbose:
+        print(f"X_eda_tonic shape: {X_eda_tonic.shape}")
+        print(f"X_eda_phasic shape: {X_eda_phasic.shape}")
+
+    # Reshape the processed data back to the original shape
+    X_eda_tonic = X_eda_tonic.reshape(X.shape[0], X.shape[1], -1)
+    X_eda_phasic = X_eda_phasic.reshape(X.shape[0], X.shape[1], -1)
+    if verbose:
+        print(f"X_eda_tonic shape after reshaping: {X_eda_tonic.shape}")
+        print(f"X_eda_phasic shape after reshaping: {X_eda_phasic.shape}")
+
+    # Concatenate the processed data with X
+    X = np.concatenate((X, X_eda_tonic, X_eda_phasic), axis=-1)
+    if verbose:
+        print(f"X shape after concatenation: {X.shape}")
+
+    # Remove the EDA feature from X
+    X = np.delete(X, 4, axis=-1)
+    if verbose:
+        print(f"X shape after removing EDA: {X.shape}")
+
+    norm = 'minmax' if normalise is True else ('standard' if normalise is False else 'original')
+
     if save:
-        with open(f'output/dl_X_wl{wl}_sr{sr}.pkl', 'wb') as f:
+        with open(f'output/dl_X_wl{wl}_sr{sr}_{norm}.pkl', 'wb') as f:
             pickle.dump(X, f)
-        with open(f'output/dl_y_wl{wl}_sr{sr}.pkl', 'wb') as f:
+        with open(f'output/dl_y_wl{wl}_sr{sr}_{norm}.pkl', 'wb') as f:
             pickle.dump(y, f)
-        with open(f'output/dl_p_wl{wl}_sr{sr}.pkl', 'wb') as f:
+        with open(f'output/dl_p_wl{wl}_sr{sr}_{norm}.pkl', 'wb') as f:
             pickle.dump(p, f)
     
     return X, y, p
@@ -379,7 +505,11 @@ def prepare_train_val_test_sets(X=None, y=None, p=None, filenames=None, test_siz
 
     return X_train, X_val, X_test, y_train, y_val, y_test, p_train, p_val, p_test
 
-def prepare_for_ml(data, feature_names=['temp', 'bvp', 'hr', 'body_acc', 'eda_tonic', 'eda_phasic']):
+def prepare_for_ml(X, y, feature_names=['temp', 'bvp', 'hr', 'body_acc', 'eda_tonic', 'eda_phasic'], wl=24, sr=32):
+    timesteps = wl * sr
+
+    X = X[:, :timesteps, :]
+
     # Define the operations
     operations = [np.mean, np.std, np.min, np.max, skew, kurtosis]
     operation_names = ['mean', 'std', 'min', 'max', 'skew', 'kurt']
@@ -391,12 +521,19 @@ def prepare_for_ml(data, feature_names=['temp', 'bvp', 'hr', 'body_acc', 'eda_to
     column_names = []
 
     # Loop over the last dimension of the data (the features)
-    for i in range(data.shape[-1]):
+    for i in range(X.shape[-1]):
         # Extract the feature
-        feature = data[:, :, i]
+        feature = X[:, :, i]
 
         # Calculate the aggregates for this feature
         aggregates = [op(feature, axis=1) for op in operations]
+
+        # Replace NaN values with the mean of the feature for that decision class
+        for j, op in enumerate(operations):
+            if np.isnan(aggregates[j]).any():
+                for class_value in np.unique(y):
+                    mask = (y == class_value)
+                    aggregates[j][mask & np.isnan(aggregates[j])] = np.nanmean(aggregates[j][mask])
 
         # Add the aggregates to the results
         results.extend(aggregates)
@@ -405,7 +542,7 @@ def prepare_for_ml(data, feature_names=['temp', 'bvp', 'hr', 'body_acc', 'eda_to
         column_names.extend([f'{feature_names[i]}_{op_name}' for op_name in operation_names])
 
     # Convert the results to a 2D array
-    results = np.stack(results, axis=-1)
+    results = np.stack(results, axis=1)
 
     # Convert the results to a DataFrame
     df = pd.DataFrame(results, columns=column_names)
@@ -554,3 +691,110 @@ def get_dataset_names(s_range, reference_classes):
 
 def get_dataset_name(s, reference_class):
     return f'dataset_{reference_class}_win{s}.csv'
+
+
+def handle_outliers_and_impute(X_train, X_val, X_test, random_state=42, num_mad=3, verbose=False):
+    # Number of features
+    num_features = X_train.shape[2]
+
+    # Impute missing values before outlier detection
+    imputer = IterativeImputer(random_state=random_state)
+
+    # Reshape the data to 2D, impute, then reshape back to 3D
+    X_train_shape = X_train.shape
+    X_val_shape = X_val.shape
+    X_test_shape = X_test.shape
+    
+    X_train = imputer.fit_transform(X_train.reshape(-1, X_train_shape[-1])).reshape(X_train_shape)
+    X_val = imputer.transform(X_val.reshape(-1, X_val_shape[-1])).reshape(X_val_shape)
+    X_test = imputer.transform(X_test.reshape(-1, X_test_shape[-1])).reshape(X_test_shape)
+
+    print("Initial imputation complete.")
+
+    # Print missing values
+    if verbose:
+        print("Missing values before outlier detection:")
+        print(pd.DataFrame({
+            'Train': [np.mean(np.isnan(X_train))],
+            'Validation': [np.mean(np.isnan(X_val))],
+            'Test': [np.mean(np.isnan(X_test))]
+        }))
+
+    # Initialize arrays to store outliers
+    outliers_train = np.zeros_like(X_train, dtype=bool)
+    outliers_val = np.zeros_like(X_val, dtype=bool)
+    outliers_test = np.zeros_like(X_test, dtype=bool)
+
+    # Initialize DataFrame to store percentage of outliers
+    outliers_df = pd.DataFrame(columns=['Feature', 'Train', 'Validation', 'Test'])
+
+    for feature in range(num_features):
+        # Select the feature from each dataset
+        X_train_feature = X_train[:, :, feature]
+        X_val_feature = X_val[:, :, feature]
+        X_test_feature = X_test[:, :, feature]
+
+        # Median Absolute Deviation
+        mad = median_abs_deviation(X_train_feature)
+        threshold = num_mad * mad  # 3x median absolute deviation as threshold
+
+        outliers_train[:, :, feature] = np.abs(X_train_feature - np.median(X_train_feature)) > threshold
+        outliers_val[:, :, feature] = np.abs(X_val_feature - np.median(X_val_feature)) > threshold
+        outliers_test[:, :, feature] = np.abs(X_test_feature - np.median(X_test_feature)) > threshold
+
+        # Add percentage of outliers to DataFrame
+        outliers_df = pd.concat([outliers_df, pd.DataFrame({
+            'Feature': feature,
+            'Train': np.mean(outliers_train[:, :, feature]) * 100,
+            'Validation': np.mean(outliers_val[:, :, feature]) * 100,
+            'Test': np.mean(outliers_test[:, :, feature]) * 100
+        }, index=[0])], ignore_index=True)
+
+    # Replace outliers with np.nan in the original datasets
+    X_train = np.where(outliers_train, np.nan, X_train)
+    X_val = np.where(outliers_val, np.nan, X_val)
+    X_test = np.where(outliers_test, np.nan, X_test)
+
+    # Impute missing values after outlier detection
+    X_train = imputer.fit_transform(X_train.reshape(-1, X_train_shape[-1])).reshape(X_train_shape)
+    X_val = imputer.transform(X_val.reshape(-1, X_val_shape[-1])).reshape(X_val_shape)
+    X_test = imputer.transform(X_test.reshape(-1, X_test_shape[-1])).reshape(X_test_shape)
+
+    print("Final imputation complete.")
+
+    # Print DataFrame of outliers
+    if verbose:
+        print(outliers_df)
+
+    return X_train, X_val, X_test
+
+def scale_features(X_train, X_val, X_test, p_train, p_val, p_test, normalise=True):
+    datasets = [X_train, X_val, X_test]
+    participants = [p_train, p_val, p_test]
+    scaled_datasets = []
+
+    for X, p in zip(datasets, participants):
+        unique_participants = np.unique(p)
+        scaled_data = []
+
+        for participant in unique_participants:
+            participant_indices = np.where(p == participant)[0]
+            participant_data = X[participant_indices]
+
+            for j in range(participant_data.shape[2]):
+                original_shape = participant_data[:, :, j].shape
+
+                if normalise:
+                    scaler = StandardScaler()
+                else:
+                    scaler = MinMaxScaler()
+
+                scaled_feature = scaler.fit_transform(participant_data[:, :, j].reshape(-1, 1)).reshape(original_shape)
+                participant_data[:, :, j] = scaled_feature
+
+            scaled_data.append(participant_data)
+
+        scaled_X = np.concatenate(scaled_data, axis=0)
+        scaled_datasets.append(scaled_X)
+
+    return scaled_datasets
