@@ -798,3 +798,45 @@ def scale_features(X_train, X_val, X_test, p_train, p_val, p_test, normalise=Tru
         scaled_datasets.append(scaled_X)
 
     return scaled_datasets
+
+def inject_synthetic_data(X_train_fold, y_train_fold, variational_autoencoder=None, fraction_synthetic=0.5, seed=42, rebalance=True):
+    np.random.seed(seed)
+
+    # Calculate the number of synthetic samples to generate
+    num_synthetic_samples = int(len(X_train_fold) * fraction_synthetic)
+    new_total = len(X_train_fold) + num_synthetic_samples
+
+    # If rebalance is True, rebalance the class distribution towards the minority class
+    if rebalance:
+        # Calculate the number of samples in each class
+        num_neg = np.sum(y_train_fold == 0)
+        num_pos = np.sum(y_train_fold == 1)
+
+        add_to_neg = (new_total // 2) - num_neg if ((new_total // 2) - num_neg) > 0 else 0
+        add_to_pos = (new_total // 2) - num_pos if ((new_total // 2) - num_pos) > 0 else 0
+
+        # Generate synthetic samples for each class
+        synthetic_samples_neg = np.random.normal(size=(add_to_neg, X_train_fold.shape[1]))
+        synthetic_samples_pos = np.random.normal(size=(add_to_pos, X_train_fold.shape[1]))
+        # synthetic_samples_neg = variational_autoencoder.generate_samples(add_to_neg, condition=0)
+        # synthetic_samples_pos = variational_autoencoder.generate_samples(add_to_pos, condition=1)
+
+        # Combine the synthetic samples
+        synthetic_samples = np.concatenate([synthetic_samples_neg, synthetic_samples_pos])
+        synthetic_labels = np.array([0] * add_to_neg + [1] * add_to_pos)
+    else:
+        # Generate synthetic samples for each class
+        synthetic_samples_neg = np.random.normal(size=(num_synthetic_samples // 2, X_train_fold.shape[1]))
+        synthetic_samples_pos = np.random.normal(size=(num_synthetic_samples // 2, X_train_fold.shape[1]))
+        # synthetic_samples_neg = vae.generate_samples(num_synthetic_samples // 2, condition=0)
+        # synthetic_samples_pos = vae.generate_samples(num_synthetic_samples // 2, condition=1)
+
+        # Combine the synthetic samples
+        synthetic_samples = np.concatenate([synthetic_samples_neg, synthetic_samples_pos])
+        synthetic_labels = np.array([0] * len(synthetic_samples_neg) + [1] * len(synthetic_samples_pos))
+    
+    # Inject the synthetic samples into the training fold
+    X_train_fold = np.concatenate([X_train_fold, synthetic_samples])
+    y_train_fold = np.concatenate([y_train_fold, synthetic_labels])
+
+    return X_train_fold, y_train_fold
